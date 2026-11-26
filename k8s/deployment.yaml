@@ -15,14 +15,18 @@ spec:
       labels:
         app: g1-manifest
     spec:
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
-        runAsUser: 1000
-        fsGroup: 1000
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: g1-manifest
-          image: g1-manifest:latest
-          imagePullPolicy: IfNotPresent
+          image: g1-manifest:0.1.0
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
               name: http
@@ -50,7 +54,7 @@ spec:
               memory: 512Mi
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           volumeMounts:
@@ -58,8 +62,12 @@ spec:
               mountPath: /data/views
             - name: keys
               mountPath: /data/keys
+            - name: tmp
+              mountPath: /tmp
       volumes:
         - name: views
           emptyDir: {}
         - name: keys
+          emptyDir: {}
+        - name: tmp
           emptyDir: {}

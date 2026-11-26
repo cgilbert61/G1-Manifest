@@ -9,7 +9,10 @@ COPY pyproject.toml requirements.txt README.md LICENSE ./
 COPY estate_graph ./estate_graph
 COPY examples ./examples
 
-RUN pip install --no-cache-dir ".[host]" \
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir ".[host]" \
     && useradd --create-home --shell /usr/sbin/nologin appuser \
     && mkdir -p /data/views /data/keys \
     && chown -R appuser:appuser /app /data

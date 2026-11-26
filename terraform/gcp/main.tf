@@ -22,6 +22,11 @@ resource "google_storage_bucket" "manifest_artifacts" {
   project                     = var.project_id
   location                    = "US"
   uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+
+  versioning {
+    enabled = true
+  }
 
   retention_policy {
     retention_period = 7776000 # 90 days
