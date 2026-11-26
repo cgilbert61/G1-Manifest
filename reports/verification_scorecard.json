@@ -1,6 +1,6 @@
 {
   "project": "G1-Manifest",
-  "generated_at": "2026-11-26T16:41:37Z",
+  "generated_at": "2026-11-26T17:10:53Z",
   "overall": "PASS",
   "executed_checks": {
     "unit_and_integration_tests": {
@@ -9,7 +9,7 @@
       "status": "PASS",
       "tail": [
         "......................................................s.........         [100%]",
-        "63 passed, 1 skipped in 4.62s"
+        "63 passed, 1 skipped in 4.52s"
       ]
     },
     "consumer_conformance": {
@@ -18,7 +18,7 @@
       "status": "PASS",
       "tail": [
         ".....                                                                    [100%]",
-        "5 passed in 0.63s"
+        "5 passed in 0.59s"
       ]
     },
     "end_to_end_demo": {
@@ -47,33 +47,33 @@
     "metrics": {
       "build_ms": {
         "samples": 25,
-        "p50_ms": 1.309,
-        "p95_ms": 2.229,
-        "p99_ms": 2.343
+        "p50_ms": 1.06,
+        "p95_ms": 1.19,
+        "p99_ms": 1.21
       },
       "reconcile_ms": {
         "samples": 25,
-        "p50_ms": 0.029,
-        "p95_ms": 0.046,
-        "p99_ms": 0.047
+        "p50_ms": 0.026,
+        "p95_ms": 0.031,
+        "p99_ms": 0.038
       },
       "sign_ms": {
         "samples": 25,
-        "p50_ms": 0.276,
-        "p95_ms": 0.837,
-        "p99_ms": 0.977
+        "p50_ms": 0.248,
+        "p95_ms": 0.347,
+        "p99_ms": 0.435
       },
       "verify_ms": {
         "samples": 25,
-        "p50_ms": 0.319,
-        "p95_ms": 0.462,
-        "p99_ms": 0.831
+        "p50_ms": 0.283,
+        "p95_ms": 0.329,
+        "p99_ms": 0.349
       },
       "render_ms": {
         "samples": 25,
-        "p50_ms": 0.848,
-        "p95_ms": 1.75,
-        "p99_ms": 7.923
+        "p50_ms": 0.757,
+        "p95_ms": 1.12,
+        "p99_ms": 8.128
       }
     }
   }

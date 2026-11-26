@@ -17,6 +17,16 @@ variable "bucket_name" {
   type = string
 }
 
+variable "log_bucket_name" {
+  type        = string
+  description = "Target GCS bucket for access logs"
+}
+
+variable "kms_key_name" {
+  type        = string
+  description = "Cloud KMS CryptoKey resource ID for bucket encryption"
+}
+
 resource "google_storage_bucket" "manifest_artifacts" {
   name                        = var.bucket_name
   project                     = var.project_id
@@ -26,6 +36,15 @@ resource "google_storage_bucket" "manifest_artifacts" {
 
   versioning {
     enabled = true
+  }
+
+  encryption {
+    default_kms_key_name = var.kms_key_name
+  }
+
+  logging {
+    log_bucket        = var.log_bucket_name
+    log_object_prefix = "g1-manifest-access-logs/"
   }
 
   retention_policy {

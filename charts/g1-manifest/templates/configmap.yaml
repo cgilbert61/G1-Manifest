@@ -6,4 +6,4 @@ metadata:
 data:
   G1_MANIFEST_PORT: {{ .Values.config.G1_MANIFEST_PORT | quote }}
   G1_MANIFEST_VIEWS_DIR: {{ .Values.config.G1_MANIFEST_VIEWS_DIR | quote }}
-  G1_MANIFEST_KEYS_DIR: {{ .Values.config.G1_MANIFEST_KEYS_DIR | quote }}
+  G1_MANIFEST_SIGNING_DIR: {{ .Values.config.G1_MANIFEST_SIGNING_DIR | quote }}

@@ -25,7 +25,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: g1-manifest
-          image: g1-manifest:0.1.0
+          image: g1-manifest:0.1.0@sha256:b52e7bb8b37369dc8067d69254c14124bb4ef3479de32af19d21240a3309d195
           imagePullPolicy: Always
           ports:
             - containerPort: 8080

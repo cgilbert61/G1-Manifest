@@ -196,9 +196,9 @@ G1-Manifest integrates with **G1-Docket** and **G1-Warrant** exclusively through
 | :--- | :--- | :--- | :--- |
 | **Gitleaks** | Git history & repository secrets | `EXECUTED` | **0 leaks** |
 | **Semgrep** | Python SAST (`.semgrep.yml` + `p/python`, 154 rules) | `EXECUTED` | **0 findings** |
-| **Trivy FS** | Repository IaC misconfigurations, vulns & secrets | `EXECUTED` | **0 CRITICAL / 0 HIGH**, 0 secrets |
-| **Trivy Image** | `g1-manifest:latest` OS + Python CVEs & secrets | `EXECUTED` | **0 CRITICAL / 0 fixable HIGH**, **0 Python CVEs**, 0 secrets |
-| **Checkov** | Dockerfile, Helm, Kubernetes, Terraform | `EXECUTED` | Dockerfile `31/31`, Helm `2/2`, K8s `90/91`, Terraform `20/24` |
+| **Checkov** | Dockerfile, Helm, Kubernetes, Terraform | `EXECUTED` | **188 passed, 0 failed** (`70/70` Dockerfile, `91/91` K8s, `25/25` Terraform, `2/2` Helm) |
+| **Trivy Image** | `g1-manifest:latest` (Alpine 3.24) OS + Python CVEs & secrets | `EXECUTED` | **0 CRITICAL / 0 HIGH**, **0 Python CVEs**, **0 secrets** (5 MEDIUM, 1 LOW) |
+| **Trivy FS** | Repository IaC misconfigurations, vulns & secrets | `EXECUTED` | **0 CRITICAL / 0 HIGH**, **0 vulns**, **0 secrets** (3 MEDIUM) |
 | **oss-scanner** | Standalone OSS/license scanner | `SKIPPED` | Not installed locally |
 
 ---

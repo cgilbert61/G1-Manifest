@@ -14,6 +14,26 @@ variable "bucket_name" {
   description = "Globally unique S3 bucket name for signed DSSE estate-graph envelopes"
 }
 
+variable "log_bucket_name" {
+  type        = string
+  description = "Target S3 bucket name for access logs"
+}
+
+variable "replica_bucket_arn" {
+  type        = string
+  description = "Destination S3 bucket ARN for cross-region replication"
+}
+
+variable "replication_role_arn" {
+  type        = string
+  description = "IAM role ARN for S3 cross-region replication"
+}
+
+variable "notification_topic_arn" {
+  type        = string
+  description = "SNS topic ARN for S3 artifact event notifications"
+}
+
 data "aws_caller_identity" "current" {}
 
 resource "aws_kms_key" "manifest_signing" {
@@ -64,6 +84,12 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "manifest_artifact
   }
 }
 
+resource "aws_s3_bucket_logging" "manifest_artifacts" {
+  bucket        = aws_s3_bucket.manifest_artifacts.id
+  target_bucket = var.log_bucket_name
+  target_prefix = "g1-manifest-access-logs/"
+}
+
 resource "aws_s3_bucket_lifecycle_configuration" "manifest_artifacts" {
   bucket = aws_s3_bucket.manifest_artifacts.id
   rule {
@@ -75,6 +101,28 @@ resource "aws_s3_bucket_lifecycle_configuration" "manifest_artifacts" {
     abort_incomplete_multipart_upload {
       days_after_initiation = 7
     }
+  }
+}
+
+resource "aws_s3_bucket_replication_configuration" "manifest_artifacts" {
+  depends_on = [aws_s3_bucket_versioning.manifest_artifacts]
+  role       = var.replication_role_arn
+  bucket     = aws_s3_bucket.manifest_artifacts.id
+  rule {
+    id     = "replicate-signed-envelopes"
+    status = "Enabled"
+    destination {
+      bucket        = var.replica_bucket_arn
+      storage_class = "STANDARD_IA"
+    }
+  }
+}
+
+resource "aws_s3_bucket_notification" "manifest_artifacts" {
+  bucket = aws_s3_bucket.manifest_artifacts.id
+  topic {
+    topic_arn = var.notification_topic_arn
+    events    = ["s3:ObjectCreated:*"]
   }
 }
 
