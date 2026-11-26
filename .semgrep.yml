@@ -1,0 +1,23 @@
+rules:
+  - id: g1-manifest-no-shell-true
+    patterns:
+      - pattern: subprocess.$FUNC(..., shell=True, ...)
+    message: Avoid shell=True in subprocess calls to prevent command injection.
+    languages: [python]
+    severity: ERROR
+
+  - id: g1-manifest-no-eval-exec
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: exec(...)
+    message: Disallow dynamic eval/exec in G1-Manifest runtime code.
+    languages: [python]
+    severity: ERROR
+
+  - id: g1-manifest-no-pickle
+    pattern-either:
+      - pattern: pickle.loads(...)
+      - pattern: pickle.load(...)
+    message: Disallow unsafe pickle deserialization; use canonical JSON.
+    languages: [python]
+    severity: ERROR

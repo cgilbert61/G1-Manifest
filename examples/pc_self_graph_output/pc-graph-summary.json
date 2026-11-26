@@ -1,0 +1,52 @@
+{
+  "nodes": 831,
+  "package_edges": 2865,
+  "substrates": [
+    "dpkg",
+    "pip"
+  ],
+  "most_depended_on": [
+    {
+      "package": "dpkg:libc6",
+      "dependents": 567
+    },
+    {
+      "package": "dpkg:libgcc-s1",
+      "dependents": 96
+    },
+    {
+      "package": "dpkg:libstdc++6",
+      "dependents": 86
+    },
+    {
+      "package": "dpkg:zlib1g",
+      "dependents": 81
+    },
+    {
+      "package": "dpkg:python3",
+      "dependents": 61
+    },
+    {
+      "package": "dpkg:libx11-6",
+      "dependents": 40
+    },
+    {
+      "package": "dpkg:libselinux1",
+      "dependents": 32
+    },
+    {
+      "package": "dpkg:libglib2.0-0t64",
+      "dependents": 28
+    },
+    {
+      "package": "dpkg:libxml2",
+      "dependents": 25
+    },
+    {
+      "package": "dpkg:libssl3t64",
+      "dependents": 23
+    }
+  ],
+  "signed_and_verified": true,
+  "expires_at": 1795783449
+}

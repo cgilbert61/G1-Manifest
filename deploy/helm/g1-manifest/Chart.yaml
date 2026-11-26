@@ -1,0 +1,6 @@
+apiVersion: v2
+name: g1-manifest
+description: G1-Manifest — Learned, signed, expiring estate dependency graphs
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

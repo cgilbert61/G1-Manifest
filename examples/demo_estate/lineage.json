@@ -1,0 +1,1 @@
+{"eventTime":"2026-11-26T03:05:00Z","eventType":"COMPLETE","inputs":[{"name":"payments-events","namespace":"aws/s3"}],"job":{"name":"ledger-rollup","namespace":"etl"},"outputs":[{"name":"ledger-db","namespace":"postgres/prod"}],"producer":"demo","run":{"runId":"demo-run-0001"}}

@@ -1,0 +1,7 @@
+# Runtime: signing/verification only. Everything else is stdlib.
+cryptography>=42
+# Host scanning (scan-host): loaded-module observation. Optional at
+# runtime — without it, scan-host reports the module source as skipped.
+psutil>=5.9
+# Development / tests
+pytest>=8

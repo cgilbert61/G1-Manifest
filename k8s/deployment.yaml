@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: g1-manifest
+  namespace: g1-manifest
+  labels:
+    app: g1-manifest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: g1-manifest
+  template:
+    metadata:
+      labels:
+        app: g1-manifest
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: g1-manifest
+          image: g1-manifest:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef:
+                name: g1-manifest-config
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: views
+              mountPath: /data/views
+            - name: keys
+              mountPath: /data/keys
+      volumes:
+        - name: views
+          emptyDir: {}
+        - name: keys
+          emptyDir: {}

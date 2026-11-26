@@ -1,0 +1,80 @@
+{
+  "project": "G1-Manifest",
+  "generated_at": "2026-11-26T16:21:37Z",
+  "overall": "PASS",
+  "executed_checks": {
+    "unit_and_integration_tests": {
+      "command": "C:\\Users\\chuck\\Anaconda3\\python.exe -m pytest -q tests/",
+      "returncode": 0,
+      "status": "PASS",
+      "tail": [
+        "......................................................s.........         [100%]",
+        "63 passed, 1 skipped in 4.95s"
+      ]
+    },
+    "consumer_conformance": {
+      "command": "C:\\Users\\chuck\\Anaconda3\\python.exe -m pytest -q conformance/",
+      "returncode": 0,
+      "status": "PASS",
+      "tail": [
+        ".....                                                                    [100%]",
+        "5 passed in 0.62s"
+      ]
+    },
+    "end_to_end_demo": {
+      "command": "C:\\Users\\chuck\\Anaconda3\\python.exe -m examples.run_demo",
+      "returncode": 0,
+      "status": "PASS",
+      "tail": [
+        "  rendered -> D:\\Manifest\\g1-estate-graph-prototype\\g1-estate-graph\\examples\\demo_estate\\demo_view.html",
+        "",
+        "== arming gate (consumer view) ==",
+        "  checkout-api: DENY \u2014 observed egress to 'ip:203.0.113.66' is not in the signed-off declared set; a human must review and sign before arming",
+        "  payments-api: ALLOW \u2014 all observed egress is in the signed-off declared set"
+      ]
+    },
+    "compliance_harness": {
+      "command": "C:\\Users\\chuck\\Anaconda3\\python.exe scripts/compliance_harness.py",
+      "returncode": 0,
+      "status": "PASS",
+      "tail": [
+        "Executed checks: 3/3 PASS"
+      ]
+    }
+  },
+  "benchmarks": {
+    "iterations": 25,
+    "metrics": {
+      "build_ms": {
+        "samples": 25,
+        "p50_ms": 1.079,
+        "p95_ms": 1.362,
+        "p99_ms": 1.599
+      },
+      "reconcile_ms": {
+        "samples": 25,
+        "p50_ms": 0.027,
+        "p95_ms": 0.037,
+        "p99_ms": 0.038
+      },
+      "sign_ms": {
+        "samples": 25,
+        "p50_ms": 0.251,
+        "p95_ms": 0.318,
+        "p99_ms": 0.42
+      },
+      "verify_ms": {
+        "samples": 25,
+        "p50_ms": 0.286,
+        "p95_ms": 0.349,
+        "p99_ms": 0.5
+      },
+      "render_ms": {
+        "samples": 25,
+        "p50_ms": 0.801,
+        "p95_ms": 1.041,
+        "p99_ms": 8.199
+      }
+    }
+  }
+}

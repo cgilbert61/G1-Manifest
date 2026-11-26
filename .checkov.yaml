@@ -1,0 +1,8 @@
+framework:
+  - dockerfile
+  - kubernetes
+  - helm
+  - terraform
+compact: true
+quiet: true
+soft-fail: false

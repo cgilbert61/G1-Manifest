@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "g1-estate-graph"
+version = "0.1.0"
+description = "Learned, signed, expiring estate dependency graphs — evidence over declaration."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.11"
+dependencies = ["cryptography>=42"]
+
+[project.optional-dependencies]
+host = ["psutil>=5.9"]
+
+[project.scripts]
+estate-graph = "estate_graph.cli:main"
+g1-manifest = "estate_graph.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["estate_graph*"]
+
+[tool.setuptools.package-data]
+estate_graph = ["assets/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -1,0 +1,36 @@
+{
+  "project": "G1-Manifest",
+  "generated_at": "2026-11-26T16:21:36Z",
+  "executed_checks": [
+    {
+      "id": "G1M-CRYPTO-01",
+      "control": "SC-12 / SC-13",
+      "status": "PASS",
+      "detail": "Ed25519 DSSEv1 round-trip, expiry rejection, and bad-signature rejection verified"
+    },
+    {
+      "id": "G1M-CONT-01",
+      "control": "CM-6 / AC-6",
+      "status": "PASS",
+      "detail": "Dockerfile enforces non-root USER appuser and HEALTHCHECK"
+    },
+    {
+      "id": "G1M-SCHEMA-01",
+      "control": "SI-10",
+      "status": "PASS",
+      "detail": "JSON Schema Draft 2020-12 files validated"
+    }
+  ],
+  "narrative_mappings": [
+    {
+      "control": "CM-8 (System Component Inventory)",
+      "status": "UNVERIFIED",
+      "note": "Architectural alignment via declared + observed host/estate inventory; requires organizational SSP review."
+    },
+    {
+      "control": "AU-9 (Protection of Audit Information)",
+      "status": "UNVERIFIED",
+      "note": "WORM object-lock storage provided in terraform/ modules; requires live cloud deployment audit."
+    }
+  ]
+}

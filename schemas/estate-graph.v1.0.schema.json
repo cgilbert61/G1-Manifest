@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://g1163rt.ai/schemas/estate-graph.v1.0.schema.json",
+  "title": "G1-Manifest Estate Dependency Graph v1.0",
+  "type": "object",
+  "required": ["graph_id", "version", "sequence", "producer", "issued_at", "expires_at", "nodes", "edges"],
+  "properties": {
+    "graph_id": { "type": "string", "minLength": 1 },
+    "version": { "type": "string", "const": "1.0" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "producer": { "type": "string" },
+    "issued_at": { "type": "integer", "minimum": 0 },
+    "expires_at": { "type": "integer", "minimum": 0 },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "substrate", "labels"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string" },
+          "substrate": { "type": "string" },
+          "labels": { "type": "object" }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "target", "layer", "low_frequency", "evidence"],
+        "properties": {
+          "source": { "type": "string" },
+          "target": { "type": "string" },
+          "port": { "type": ["integer", "null"] },
+          "protocol": { "type": ["string", "null"] },
+          "layer": { "type": "string", "enum": ["network", "lineage", "package", "observed-load"] },
+          "low_frequency": { "type": "boolean" },
+          "labels": { "type": "object" },
+          "evidence": {
+            "type": "object",
+            "required": ["flow_count", "first_seen", "last_seen", "sources", "window_seconds"],
+            "properties": {
+              "flow_count": { "type": "integer", "minimum": 0 },
+              "first_seen": { "type": "integer", "minimum": 0 },
+              "last_seen": { "type": "integer", "minimum": 0 },
+              "window_seconds": { "type": "integer", "minimum": 0 },
+              "sources": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    }
+  }
+}

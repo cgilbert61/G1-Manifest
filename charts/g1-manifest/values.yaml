@@ -1,0 +1,19 @@
+replicaCount: 1
+image:
+  repository: g1-manifest
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+service:
+  type: ClusterIP
+  port: 8080
+config:
+  G1_MANIFEST_PORT: "8080"
+  G1_MANIFEST_VIEWS_DIR: "/data/views"
+  G1_MANIFEST_KEYS_DIR: "/data/keys"
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

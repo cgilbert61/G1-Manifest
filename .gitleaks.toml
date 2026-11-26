@@ -1,0 +1,12 @@
+title = "G1-Manifest Gitleaks Configuration"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allowlist test fixtures and synthetic RFC 5737 documentation IPs"
+paths = [
+  '''tests/''',
+  '''examples/demo_estate/''',
+  '''examples/pc_self_graph_output/''',
+]

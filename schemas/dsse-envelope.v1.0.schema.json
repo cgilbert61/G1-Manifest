@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://g1163rt.ai/schemas/dsse-envelope.v1.0.schema.json",
+  "title": "G1-Manifest DSSEv1 Signed Envelope",
+  "type": "object",
+  "required": ["payloadType", "payload", "signatures"],
+  "properties": {
+    "payloadType": { "type": "string", "const": "application/vnd.g1163rt.estate-graph+json" },
+    "payload": { "type": "string", "minLength": 1 },
+    "signatures": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["keyid", "sig"],
+        "properties": {
+          "keyid": { "type": "string", "minLength": 1 },
+          "sig": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

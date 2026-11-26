@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: g1-manifest-config
+  namespace: g1-manifest
+data:
+  G1_MANIFEST_PORT: "8080"
+  G1_MANIFEST_VIEWS_DIR: "/data/views"
+  G1_MANIFEST_KEYS_DIR: "/data/keys"
