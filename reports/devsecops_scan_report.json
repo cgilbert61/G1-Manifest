@@ -2,7 +2,7 @@
   "project": "G1-Manifest",
   "generated_at": "2026-11-26T17:11:37Z",
   "targets": {
-    "repository": "D:\\Manifest\\g1-estate-graph-prototype\\g1-estate-graph",
+    "repository": "cgilbert61/G1-Manifest",
     "docker_image": "g1-manifest:latest"
   },
   "scanners": {
