@@ -11,3 +11,7 @@ keys/
 views/
 *.pem
 host-graph.json
+reports/checkov/
+reports/gitleaks-report.json
+reports/semgrep-report.json
+reports/trivy-*.json

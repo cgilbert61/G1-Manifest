@@ -10,7 +10,7 @@
 [![Schema](https://img.shields.io/badge/DSSEv1-Ed25519%20v1.0-blue.svg)](schemas/dsse-envelope.v1.0.schema.json)
 [![Latency](https://img.shields.io/badge/verify%20p99-%3C%205.0%20ms-success.svg)](docs/benchmarks-sizing.md)
 [![GovReady-Q](https://img.shields.io/badge/NIST%20SP%20800--53-Assessed-success.svg)](docs/govready_compliance_assessment_report.md)
-[![Federal DevSecOps](https://img.shields.io/badge/Federal%20DevSecOps-Configured-success.svg)](docs/federal_devsecops_compliance_report.md)
+[![Federal DevSecOps](https://img.shields.io/badge/Federal%20DevSecOps-Verified-success.svg)](reports/devsecops_scan_report.md)
 [![Community Profile](https://img.shields.io/badge/community%20standards-100%25%20green-success.svg)](CONTRIBUTING.md)
 
 **Learned, signed, expiring dependency graphs for an estate — evidence over declaration (`v0.1.0`) — G1163RT Security Labs.**
@@ -186,10 +186,20 @@ G1-Manifest integrates with **G1-Docket** and **G1-Warrant** exclusively through
 
 ---
 
-## Observability & Verification
+## Observability, Security Scans & Verification
 
 - **Health Probe:** `GET /health` (`200 OK` JSON) wired into `Dockerfile` `HEALTHCHECK` and `k8s/deployment.yaml` liveness/readiness probes.
-- **Empirical Verification Scorecard:** Run `python scripts/run_all_verifications.py` to execute tests, conformance, demo, compliance harness, and latency benchmarks into `reports/verification_scorecard.json`.
+- **Empirical Verification Scorecard:** Run `python scripts/run_all_verifications.py` to execute unit/integration tests, consumer conformance, demo, compliance harness, and latency benchmarks into [`reports/verification_scorecard.json`](reports/verification_scorecard.json).
+- **Latest Empirical DevSecOps Scan ([Full Report](reports/devsecops_scan_report.md)):**
+
+| Scanner | Scope | Status | Empirical Result |
+| :--- | :--- | :--- | :--- |
+| **Gitleaks** | Git history & repository secrets | `EXECUTED` | **0 leaks** |
+| **Semgrep** | Python SAST (`.semgrep.yml` + `p/python`, 154 rules) | `EXECUTED` | **0 findings** |
+| **Trivy FS** | Repository IaC misconfigurations, vulns & secrets | `EXECUTED` | **0 CRITICAL / 0 HIGH**, 0 secrets |
+| **Trivy Image** | `g1-manifest:latest` OS + Python CVEs & secrets | `EXECUTED` | **0 CRITICAL / 0 fixable HIGH**, **0 Python CVEs**, 0 secrets |
+| **Checkov** | Dockerfile, Helm, Kubernetes, Terraform | `EXECUTED` | Dockerfile `31/31`, Helm `2/2`, K8s `90/91`, Terraform `20/24` |
+| **oss-scanner** | Standalone OSS/license scanner | `SKIPPED` | Not installed locally |
 
 ---
 
