@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import html
 import json
+import os
 import re
 import socket
 import time
@@ -19,9 +20,10 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from .aggregate import aggregate
+from .auth import SESSION_COOKIE_NAME, SESSION_TTL_SECONDS, ManifestAuthManager
 from .host_reconcile import host_reconcile
 from .model import DependencyGraph, ServiceNode, iso_utc
 from .reconcile import reconcile
@@ -90,7 +92,11 @@ def _views_metadata(views_dir: Path) -> list[dict]:
     return items
 
 
-def render_index(views_dir: Path, keys_dir: Path | None = None) -> str:
+def render_index(
+    views_dir: Path,
+    keys_dir: Path | None = None,
+    principal: dict | None = None,
+) -> str:
     views = _views_metadata(views_dir)
     keyid = "not generated yet"
     if keys_dir is not None and (keys_dir / "public.pem").is_file():
@@ -120,18 +126,39 @@ def render_index(views_dir: Path, keys_dir: Path | None = None) -> str:
         else ""
     )
 
+    op_controls = (
+        '<button type="button" class="btn-secondary" id="btn-theme-toggle">'
+        "Dark</button>"
+    )
+    if principal:
+        email_s = html.escape(str(principal.get("email") or ""))
+        role_s = html.escape(str(principal.get("role") or "OPERATOR"))
+        op_controls = (
+            '<span class="op-pill">'
+            '<span class="op-dot"></span>'
+            f"<strong>{email_s}</strong>"
+            f'<span class="op-role">{role_s}</span>'
+            "</span>"
+            + op_controls
+            + '<a class="btn-danger-outline" href="/logout">Sign Out</a>'
+        )
+
     return (
         "<!DOCTYPE html>"
         '<html lang="en"><head><meta charset="utf-8">'
         "<title>G1-Manifest — G1163RT Security Labs</title>"
+        "<script>" + _THEME_BOOT_JS + "</script>"
         "<style>" + _INDEX_CSS + "</style></head><body>"
         '<header class="band">'
+        '<div class="band-top">'
         '<div class="brand">'
         f"{logo_img}"
         '<div class="brand-text">'
         "<h1>G1-Manifest</h1>"
-        '<div class="brand-sub">G1163RT Security Labs</div>'
+        '<div class="brand-sub">G1163RT Security Labs · Dependency Graph Control Plane</div>'
         "</div></div>"
+        f'<div class="op-bar">{op_controls}</div>'
+        "</div>"
         "<p>Learned, signed, expiring dependency graphs · evidence over declaration</p>"
         '<div class="key-bar">'
         f'<span>Signing key: <code id="keyid">{html.escape(keyid)}</code></span>'
@@ -539,11 +566,17 @@ def _run_ingest_host(body: dict, views_dir: Path, keys_dir: Path) -> dict:
     }
 
 
-def _windows_scanner_cmd(server_url: str) -> bytes:
+def _windows_scanner_cmd(server_url: str, ingest_token: str = "") -> bytes:
     """Self-contained double-clickable Windows scanner (.cmd, no Python needed)."""
+    hdr_stmt = (
+        f"$hdrs = @{{ 'X-Manifest-Ingest-Token' = '{ingest_token}' }}; "
+        if ingest_token
+        else "$hdrs = @{}; "
+    )
     ps_script = (
         f"$server = '{server_url}'; "
-        "$ErrorActionPreference = 'SilentlyContinue'; "
+        + hdr_stmt
+        + "$ErrorActionPreference = 'SilentlyContinue'; "
         "Write-Host 'G1-Manifest: Scanning Windows registry and loaded modules...' -ForegroundColor Cyan; "
         "$roots = @("
         "  @('HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', 'HKLM'),"
@@ -581,7 +614,7 @@ def _windows_scanner_cmd(server_url: str) -> bytes:
         "$payload = @{ hostname = $env:COMPUTERNAME; platform = 'windows'; registry_records = $reg; processes = $procs } | ConvertTo-Json -Depth 6 -Compress; "
         "Write-Host ('Uploading ' + $reg.Count + ' installed apps and ' + $procs.Count + ' processes to ' + $server + '...') -ForegroundColor Cyan; "
         "$bytes = [System.Text.Encoding]::UTF8.GetBytes($payload); "
-        "$res = Invoke-RestMethod -Method Post -Uri ($server + '/api/ingest/host') -ContentType 'application/json; charset=utf-8' -Body $bytes; "
+        "$res = Invoke-RestMethod -Method Post -Uri ($server + '/api/ingest/host') -Headers $hdrs -ContentType 'application/json; charset=utf-8' -Body $bytes; "
         "if ($res.ok) { "
         "  $viewUrl = $server + $res.url; "
         "  Write-Host ('Done! Opening ' + $viewUrl) -ForegroundColor Green; "
@@ -599,8 +632,9 @@ def _windows_scanner_cmd(server_url: str) -> bytes:
     return cmd.encode("ascii")
 
 
-def _macos_scanner_command(server_url: str) -> bytes:
+def _macos_scanner_command(server_url: str, ingest_token: str = "") -> bytes:
     """Self-contained double-clickable macOS scanner (.command)."""
+    tok_arg = f' -H "X-Manifest-Ingest-Token: {ingest_token}"' if ingest_token else ""
     script = f"""#!/bin/bash
 set -euo pipefail
 SERVER="{server_url}"
@@ -667,7 +701,7 @@ print(json.dumps({{
 }}))
 PY
 )
-RESP=$(curl -sS -X POST "$SERVER/api/ingest/host" -H "Content-Type: application/json" -d "$PAYLOAD")
+RESP=$(curl -sS -X POST "$SERVER/api/ingest/host"{tok_arg} -H "Content-Type: application/json" -d "$PAYLOAD")
 VIEW_URL=$(/usr/bin/python3 -c 'import json, sys; d=json.loads(sys.argv[1]); print(d.get("url",""))' "$RESP")
 if [ -n "$VIEW_URL" ]; then
   echo "Done! Opening $SERVER$VIEW_URL"
@@ -768,21 +802,212 @@ def _run_render_artifact(body: dict, views_dir: Path, keys_dir: Path) -> dict:
     }
 
 
-def make_handler(views_dir: Path, keys_dir: Path | None = None):
+def render_login_portal(auth_mgr: ManifestAuthManager, next_url: str = "/") -> str:
+    """Render the G1-Manifest Institutional MFA Login Portal (matching G1-Warrant & G1-Docket)."""
+    logo_uri = logo_data_uri()
+    logo_img = (
+        f'<img class="login-logo" src="{logo_uri}" alt="G1-Manifest Logo">'
+        if logo_uri
+        else ""
+    )
+    safe_next = next_url if next_url.startswith("/") and not next_url.startswith("//") else "/"
+    demo_cards: list[str] = []
+    if auth_mgr.demo_enabled:
+        for idx, acct in enumerate(auth_mgr.demo_accounts):
+            email_e = html.escape(acct["email"])
+            role_e = html.escape(acct["role"])
+            name_e = html.escape(acct["display_name"])
+            pw_e = html.escape(acct["passphrase"])
+            mfa_e = html.escape(acct["mfa_code"])
+            demo_cards.append(
+                f'<button type="button" class="demo-row" data-demo-idx="{idx}">'
+                '<div class="demo-row-top">'
+                f'<span class="demo-email">{email_e}</span>'
+                f'<span class="badge-neutral">{role_e}</span>'
+                "</div>"
+                f'<div class="demo-name">{name_e}</div>'
+                f'<div class="demo-secret">Passphrase: <code>{pw_e}</code> · TOTP: <code>{mfa_e}</code></div>'
+                "</button>"
+            )
+
+    if auth_mgr.demo_enabled:
+        left_panel = (
+            '<div class="demo-card">'
+            '<div class="demo-card-hdr">'
+            "<div><h3>Sandbox Demo Accounts</h3>"
+            "<p>Click any account to populate credentials (disabled in production posture).</p></div>"
+            '<span class="badge-warn">SANDBOX MODE</span>'
+            "</div>"
+            '<div class="demo-list">' + "".join(demo_cards) + "</div>"
+            "</div>"
+        )
+        quick_btn = (
+            '<button type="button" class="btn-primary" id="btn-dev-login">'
+            "DEV ADMIN LOGIN</button>"
+        )
+    else:
+        left_panel = (
+            '<div class="demo-card">'
+            '<div class="demo-card-hdr">'
+            "<div><h3>Production Posture Active</h3>"
+            "<p>Sandbox demo accounts and quick-login are disabled. Authenticate with an "
+            "enrolled operator account from <code>MANIFEST_CONSOLE_USERS_JSON</code>.</p></div>"
+            '<span class="badge-ok">LOCKED</span>'
+            "</div></div>"
+        )
+        quick_btn = ""
+
+    push_section = ""
+    if not auth_mgr.airgap_mode:
+        push_section = (
+            '<div class="push-divider"><span>OR FEDERATED HARDWARE PUSH</span></div>'
+            '<div class="push-grid">'
+            '<button type="button" class="btn-secondary" id="btn-push-duo">Cisco Duo Push</button>'
+            '<button type="button" class="btn-secondary" id="btn-push-okta">Okta FastPass</button>'
+            "</div>"
+            '<div id="push-box" class="push-box" hidden></div>'
+        )
+
+    boot_cfg = json.dumps(
+        {
+            "next_url": safe_next,
+            "demo_enabled": auth_mgr.demo_enabled,
+            "demo_accounts": auth_mgr.demo_accounts if auth_mgr.demo_enabled else [],
+        }
+    )
+
+    return (
+        "<!DOCTYPE html>"
+        '<html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        "<title>G1-Manifest — Operator Sign In | G1163RT Security Labs</title>"
+        "<script>" + _THEME_BOOT_JS + "</script>"
+        "<style>" + _INDEX_CSS + _LOGIN_CSS + "</style></head><body>"
+        '<header class="login-topbar">'
+        '<div class="login-brand">'
+        f"{logo_img}"
+        "<div>"
+        '<div class="login-brand-row"><strong>G1-MANIFEST</strong>'
+        '<span class="badge-neutral">v0.1.0</span></div>'
+        '<div class="login-sub">G1163RT Security Labs // Zero-Trust MFA Ingress Gate</div>'
+        "</div></div>"
+        '<div class="login-actions">'
+        f"{quick_btn}"
+        '<button type="button" class="btn-secondary" id="btn-theme-toggle">Dark</button>'
+        "</div></header>"
+        '<main class="login-grid">'
+        '<section class="login-left">'
+        '<div class="badge-ok">DSSEv1 ED25519 &amp; EVIDENCE RECONCILIATION ENFORCED</div>'
+        "<h1>SecOps Administrative &amp; MFA Portal</h1>"
+        "<p class=\"login-lead\">Authenticate with a PBKDF2-HMAC-SHA256 operator principal "
+        "and 6-digit RFC 6238 TOTP or Federated Push challenge to access the G1-Manifest "
+        "Dependency Graph &amp; Witness Control Plane.</p>"
+        f"{left_panel}"
+        "</section>"
+        '<section class="login-right">'
+        '<div class="login-card">'
+        '<div class="login-card-hdr">'
+        "<h2>Operator Authentication</h2>"
+        "<p>100,000-round salted PBKDF2-HMAC-SHA256 + 6-digit TOTP / Push verification</p>"
+        "</div>"
+        '<div id="login-alert" class="status-box" hidden></div>'
+        '<form id="form-login" class="form">'
+        '<label for="login-email">Operator Principal (Email or ID)'
+        '<input type="text" id="login-email" value="ops@g1163rt.ai" autocomplete="username" required></label>'
+        '<label for="login-password">Operator Passphrase'
+        '<input type="password" id="login-password" placeholder="Enter operator passphrase" autocomplete="current-password" required></label>'
+        '<div class="mfa-row">'
+        '<label for="login-mfa">6-Digit TOTP Authenticator Code'
+        '<input type="text" id="login-mfa" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code"></label>'
+        '<button type="button" class="btn-secondary" id="btn-autofill-mfa">Auto-Fill TOTP</button>'
+        "</div>"
+        '<button type="submit" class="btn-primary btn-full" id="btn-login-submit">'
+        "Authenticate &amp; Open Console</button>"
+        "</form>"
+        f"{push_section}"
+        "</div></section></main>"
+        f"<script>window.__G1_LOGIN_CFG={boot_cfg};" + _LOGIN_JS + "</script>"
+        "</body></html>"
+    )
+
+
+def _resolve_require_auth(require_auth: bool | None) -> bool:
+    if require_auth is not None:
+        return bool(require_auth)
+    env_val = os.environ.get("MANIFEST_REQUIRE_AUTH", "").strip().lower()
+    return env_val in ("1", "true", "yes")
+
+
+def make_handler(
+    views_dir: Path,
+    keys_dir: Path | None = None,
+    *,
+    require_auth: bool | None = None,
+    auth_manager: ManifestAuthManager | None = None,
+):
     root = views_dir.resolve()
     kdir = (keys_dir or (root.parent / "keys")).resolve()
+    enforce_auth = _resolve_require_auth(require_auth)
+    auth_mgr = auth_manager or ManifestAuthManager()
 
     class WitnessHandler(BaseHTTPRequestHandler):
-        def _send(self, status: int, content_type: str, body: bytes) -> None:
+        def _send(
+            self,
+            status: int,
+            content_type: str,
+            body: bytes,
+            extra_headers: list[tuple[str, str]] | None = None,
+        ) -> None:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            for k, v in extra_headers or []:
+                self.send_header(k, v)
             self.end_headers()
             self.wfile.write(body)
 
-        def _send_json(self, status: int, obj: dict) -> None:
-            self._send(status, "application/json", json.dumps(obj).encode("utf-8"))
+        def _redirect(
+            self, location: str, extra_headers: list[tuple[str, str]] | None = None
+        ) -> None:
+            self.send_response(HTTPStatus.FOUND)
+            self.send_header("Location", location)
+            self.send_header("Cache-Control", "no-cache")
+            for k, v in extra_headers or []:
+                self.send_header(k, v)
+            self.end_headers()
+
+        def _send_json(
+            self,
+            status: int,
+            obj: dict,
+            extra_headers: list[tuple[str, str]] | None = None,
+        ) -> None:
+            self._send(
+                status,
+                "application/json",
+                json.dumps(obj).encode("utf-8"),
+                extra_headers=extra_headers,
+            )
+
+        def _session_cookie_header(self, principal: dict) -> tuple[str, str]:
+            tok = auth_mgr.encode_session_token(principal)
+            cookie = (
+                f"{SESSION_COOKIE_NAME}={tok}; Path=/; Max-Age={SESSION_TTL_SECONDS}; "
+                "HttpOnly; SameSite=Lax"
+            )
+            return ("Set-Cookie", cookie)
+
+        def _clear_cookie_header(self) -> tuple[str, str]:
+            return (
+                "Set-Cookie",
+                f"{SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax",
+            )
+
+        def _current_principal(self) -> dict | None:
+            return auth_mgr.extract_request_principal(self.headers)
 
         def _read_json(self) -> dict:
             length = int(self.headers.get("Content-Length", "0") or "0")
@@ -798,22 +1023,16 @@ def make_handler(views_dir: Path, keys_dir: Path | None = None):
             return parsed
 
         def do_GET(self) -> None:  # noqa: N802
-            path = unquote(urlsplit(self.path).path)
-            if path in ("/", "/index.html"):
-                self._send(
-                    HTTPStatus.OK,
-                    "text/html; charset=utf-8",
-                    render_index(root, kdir).encode("utf-8"),
-                )
-                return
+            parsed_url = urlsplit(self.path)
+            path = unquote(parsed_url.path)
+            principal = self._current_principal()
+
             if path == "/health":
                 self._send_json(
                     HTTPStatus.OK, {"status": "ok", "views": len(list_views(root))}
                 )
                 return
-            if path == "/api/views":
-                self._send_json(HTTPStatus.OK, {"views": _views_metadata(root)})
-                return
+
             if path == "/api/keys/public.pem":
                 _priv, pub_path = _ensure_keys(kdir)
                 self._send(
@@ -822,33 +1041,109 @@ def make_handler(views_dir: Path, keys_dir: Path | None = None):
                     pub_path.read_bytes(),
                 )
                 return
+
+            if path == "/api/auth/status":
+                self._send_json(
+                    HTTPStatus.OK,
+                    {"authenticated": principal is not None, "principal": principal},
+                )
+                return
+
+            if path == "/api/auth/mfa-providers":
+                self._send_json(
+                    HTTPStatus.OK,
+                    {
+                        "airgap_mode": auth_mgr.airgap_mode,
+                        "demo_accounts_enabled": auth_mgr.demo_enabled,
+                        "demo_accounts": auth_mgr.demo_accounts if auth_mgr.demo_enabled else [],
+                    },
+                )
+                return
+
+            if path == "/logout":
+                self._redirect("/login", extra_headers=[self._clear_cookie_header()])
+                return
+
+            if path == "/login":
+                if principal is not None:
+                    self._redirect("/")
+                    return
+                qs = parse_qs(parsed_url.query)
+                next_url = (qs.get("next") or ["/"])[0]
+                self._send(
+                    HTTPStatus.OK,
+                    "text/html; charset=utf-8",
+                    render_login_portal(auth_mgr, next_url=next_url).encode("utf-8"),
+                )
+                return
+
+            if path in ("/", "/index.html"):
+                if enforce_auth and principal is None:
+                    self._send(
+                        HTTPStatus.OK,
+                        "text/html; charset=utf-8",
+                        render_login_portal(auth_mgr, next_url="/").encode("utf-8"),
+                    )
+                    return
+                self._send(
+                    HTTPStatus.OK,
+                    "text/html; charset=utf-8",
+                    render_index(root, kdir, principal=principal).encode("utf-8"),
+                )
+                return
+
+            if enforce_auth and principal is None:
+                if path.startswith("/api/"):
+                    self._send_json(
+                        HTTPStatus.UNAUTHORIZED,
+                        {"ok": False, "error": "AUTHENTICATION_REQUIRED"},
+                    )
+                else:
+                    self._redirect(f"/login?next={quote(path)}")
+                return
+
+            if path == "/api/views":
+                self._send_json(HTTPStatus.OK, {"views": _views_metadata(root)})
+                return
             if path == "/api/agent/windows.cmd":
                 host_hdr = self.headers.get("Host") or "127.0.0.1:8088"
-                body = _windows_scanner_cmd(f"http://{host_hdr}")
-                self.send_response(HTTPStatus.OK)
-                self.send_header("Content-Type", "application/octet-stream")
-                self.send_header(
-                    "Content-Disposition",
-                    'attachment; filename="g1-manifest-scan-windows.cmd"',
+                ing_tok = (
+                    auth_mgr.issue_ingest_token(principal["email"])
+                    if (enforce_auth and principal)
+                    else ""
                 )
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("Cache-Control", "no-cache")
-                self.end_headers()
-                self.wfile.write(body)
+                body = _windows_scanner_cmd(f"http://{host_hdr}", ingest_token=ing_tok)
+                self._send(
+                    HTTPStatus.OK,
+                    "application/octet-stream",
+                    body,
+                    extra_headers=[
+                        (
+                            "Content-Disposition",
+                            'attachment; filename="g1-manifest-scan-windows.cmd"',
+                        )
+                    ],
+                )
                 return
             if path == "/api/agent/macos.command":
                 host_hdr = self.headers.get("Host") or "127.0.0.1:8088"
-                body = _macos_scanner_command(f"http://{host_hdr}")
-                self.send_response(HTTPStatus.OK)
-                self.send_header("Content-Type", "application/octet-stream")
-                self.send_header(
-                    "Content-Disposition",
-                    'attachment; filename="g1-manifest-scan-macos.command"',
+                ing_tok = (
+                    auth_mgr.issue_ingest_token(principal["email"])
+                    if (enforce_auth and principal)
+                    else ""
                 )
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("Cache-Control", "no-cache")
-                self.end_headers()
-                self.wfile.write(body)
+                body = _macos_scanner_command(f"http://{host_hdr}", ingest_token=ing_tok)
+                self._send(
+                    HTTPStatus.OK,
+                    "application/octet-stream",
+                    body,
+                    extra_headers=[
+                        (
+                            "Content-Disposition",
+                            'attachment; filename="g1-manifest-scan-macos.command"',
+                        )
+                    ],
+                )
                 return
 
             rel = path.lstrip("/")
@@ -877,6 +1172,109 @@ def make_handler(views_dir: Path, keys_dir: Path | None = None):
             path = unquote(urlsplit(self.path).path)
             try:
                 body = self._read_json()
+
+                # Authentication & MFA routes
+                if path == "/api/auth/login":
+                    principal, err = auth_mgr.authenticate_password_mfa(
+                        str(body.get("email") or ""),
+                        str(body.get("password") or ""),
+                        str(body.get("mfa_code") or ""),
+                    )
+                    if err or principal is None:
+                        self._send_json(
+                            HTTPStatus.UNAUTHORIZED,
+                            {"ok": False, "authenticated": False, "error": err or "AUTH_FAILED"},
+                        )
+                        return
+                    self._send_json(
+                        HTTPStatus.OK,
+                        {"ok": True, "authenticated": True, "principal": principal},
+                        extra_headers=[self._session_cookie_header(principal)],
+                    )
+                    return
+
+                if path == "/api/auth/push-challenge":
+                    ch, err = auth_mgr.create_push_challenge(
+                        str(body.get("email") or ""),
+                        str(body.get("password") or ""),
+                        str(body.get("provider") or ""),
+                    )
+                    if err or ch is None:
+                        self._send_json(
+                            HTTPStatus.UNAUTHORIZED,
+                            {"ok": False, "error": err or "PUSH_DISPATCH_FAILED"},
+                        )
+                        return
+                    self._send_json(HTTPStatus.OK, {"ok": True, **ch})
+                    return
+
+                if path == "/api/auth/push-verify":
+                    principal, err = auth_mgr.verify_push_challenge(
+                        str(body.get("challenge_id") or ""),
+                        str(body.get("match_number") or ""),
+                    )
+                    if err or principal is None:
+                        self._send_json(
+                            HTTPStatus.UNAUTHORIZED,
+                            {"ok": False, "authenticated": False, "error": err or "PUSH_VERIFY_FAILED"},
+                        )
+                        return
+                    self._send_json(
+                        HTTPStatus.OK,
+                        {"ok": True, "authenticated": True, "principal": principal},
+                        extra_headers=[self._session_cookie_header(principal)],
+                    )
+                    return
+
+                if path == "/api/auth/dev-quick-login":
+                    principal, err = auth_mgr.dev_quick_login(
+                        str(body.get("email") or "ops@g1163rt.ai")
+                    )
+                    if err or principal is None:
+                        code = (
+                            HTTPStatus.FORBIDDEN
+                            if err == "DEMO_QUICK_LOGIN_DISABLED_IN_PRODUCTION"
+                            else HTTPStatus.NOT_FOUND
+                        )
+                        self._send_json(
+                            code,
+                            {"ok": False, "authenticated": False, "error": err or "QUICK_LOGIN_FAILED"},
+                        )
+                        return
+                    self._send_json(
+                        HTTPStatus.OK,
+                        {"ok": True, "authenticated": True, "principal": principal},
+                        extra_headers=[self._session_cookie_header(principal)],
+                    )
+                    return
+
+                if path == "/api/auth/logout":
+                    self._send_json(
+                        HTTPStatus.OK,
+                        {"ok": True, "authenticated": False},
+                        extra_headers=[self._clear_cookie_header()],
+                    )
+                    return
+
+                # Enforce session / ingest-token auth on operational mutations
+                if enforce_auth:
+                    principal = self._current_principal()
+                    ing_hdr = (self.headers.get("X-Manifest-Ingest-Token") or "").strip()
+                    if path == "/api/ingest/host" and auth_mgr.verify_ingest_token(ing_hdr):
+                        pass
+                    elif principal is None:
+                        self._send_json(
+                            HTTPStatus.UNAUTHORIZED,
+                            {"ok": False, "error": "AUTHENTICATION_REQUIRED: sign in at /login"},
+                        )
+                        return
+                    elif str(principal.get("role") or "").upper() == "AUDITOR":
+                        self._send_json(
+                            HTTPStatus.FORBIDDEN,
+                            {"ok": False, "error": "AUDITOR_READ_ONLY_ROLE: read-only auditors cannot run scans or rotate keys"},
+                        )
+                        return
+
                 if path == "/api/scan/estate":
                     res = _run_estate_scan(body, root, kdir)
                 elif path == "/api/scan/host":
@@ -916,72 +1314,348 @@ def serve_views(
     host: str = "0.0.0.0",
     port: int = 8080,
     keys_dir: str | Path | None = None,
+    *,
+    require_auth: bool | None = None,
 ) -> ThreadingHTTPServer:
     root = Path(views_dir)
     root.mkdir(parents=True, exist_ok=True)
     kdir = Path(keys_dir) if keys_dir is not None else root.parent / "keys"
-    return ThreadingHTTPServer((host, port), make_handler(root, kdir))
+    return ThreadingHTTPServer(
+        (host, port), make_handler(root, kdir, require_auth=require_auth)
+    )
 
+
+_THEME_BOOT_JS = """
+(function () {
+  try {
+    if (localStorage.getItem('g1_theme') === 'dark') {
+      document.documentElement.classList.add('dark');
+    }
+  } catch (_) {}
+})();
+function g1BindThemeToggle() {
+  var btn = document.getElementById('btn-theme-toggle');
+  if (!btn) return;
+  function sync() {
+    btn.textContent = document.documentElement.classList.contains('dark') ? 'Light' : 'Dark';
+  }
+  sync();
+  btn.addEventListener('click', function () {
+    var dark = document.documentElement.classList.toggle('dark');
+    try { localStorage.setItem('g1_theme', dark ? 'dark' : 'light'); } catch (_) {}
+    sync();
+  });
+}
+"""
 
 _INDEX_CSS = """
+:root {
+  --bg: #f7f9fb;
+  --surface: #ffffff;
+  --surface-subtle: #f1f5f9;
+  --border: #d8e0e8;
+  --border-sub: #e3e9ef;
+  --text: #0f172a;
+  --muted: #475569;
+  --primary: #1e293b;
+  --primary-hover: #0f172a;
+  --primary-text: #ffffff;
+  --link: #1b5e91;
+}
+html.dark {
+  color-scheme: dark;
+  --bg: #020617;
+  --surface: #0f172a;
+  --surface-subtle: #1e293b;
+  --border: #1e293b;
+  --border-sub: #1e293b;
+  --text: #f1f5f9;
+  --muted: #94a3b8;
+  --primary: #e2e8f0;
+  --primary-hover: #ffffff;
+  --primary-text: #0f172a;
+  --link: #7dd3fc;
+}
 * { box-sizing: border-box; }
-body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Helvetica,
-  Arial, sans-serif; background: #f7f9fb; color: #1d2733; }
-.band { background: #ffffff; border-bottom: 1px solid #d8e0e8;
+body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+  Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); }
+.band { background: var(--surface); border-bottom: 1px solid var(--border);
   padding: 16px 24px 14px; }
-.brand { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
-.brand-logo { width: 48px; height: 48px; object-fit: contain; flex: 0 0 auto; }
-.brand-text h1 { margin: 0; font-size: 22px; font-weight: 700; line-height: 1.15;
-  letter-spacing: -0.01em; }
-.brand-sub { margin-top: 2px; font-size: 13px; font-weight: 500; color: #43536a;
+.band-top { display: flex; flex-wrap: wrap; align-items: center;
+  justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand-logo { width: 44px; height: 44px; object-fit: contain; flex: 0 0 auto;
+  background: #ffffff; border: 1px solid var(--border); border-radius: 4px; padding: 2px; }
+.brand-text h1 { margin: 0; font-size: 21px; font-weight: 600; line-height: 1.15;
+  letter-spacing: -0.02em; color: var(--text); }
+.brand-sub { margin-top: 2px; font-size: 12.5px; font-weight: 500; color: var(--muted);
   letter-spacing: 0.02em; }
-.band p { margin: 0; font-size: 13px; color: #43536a; }
+.op-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.op-pill { display: inline-flex; align-items: center; gap: 7px; padding: 5px 10px;
+  border-radius: 4px; background: var(--surface-subtle); border: 1px solid var(--border);
+  font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.op-dot { width: 7px; height: 7px; border-radius: 50%; background: #16a34a; }
+.op-role { font-size: 10.5px; color: var(--muted); padding-left: 4px;
+  border-left: 1px solid var(--border); }
+.band p { margin: 0; font-size: 13px; color: var(--muted); }
 .key-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
-  margin-top: 10px; font-size: 12.5px; color: #43536a; }
+  margin-top: 10px; font-size: 12.5px; color: var(--muted); }
 .grid { max-width: 1180px; margin: 18px auto; padding: 0 16px 24px;
   display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
   gap: 16px; align-items: start; }
 .col { display: flex; flex-direction: column; gap: 16px; }
-.panel { background: #ffffff; border: 1px solid #d8e0e8; border-radius: 8px;
-  padding: 16px 18px; font-size: 13.5px; line-height: 1.45; }
-.panel h2 { margin: 0 0 10px; font-size: 15.5px; }
-.hint { margin: 0 0 12px; font-size: 12.5px; color: #43536a; }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  padding: 16px 18px; font-size: 13.5px; line-height: 1.5; }
+.panel h2 { margin: 0 0 10px; font-size: 15.5px; font-weight: 600; letter-spacing: -0.015em; }
+.hint { margin: 0 0 12px; font-size: 12.5px; color: var(--muted); }
 .views { list-style: none; margin: 0; padding: 0; }
 .views li { display: flex; justify-content: space-between; align-items: baseline;
-  padding: 9px 0; border-bottom: 1px solid #e3e9ef; gap: 12px; }
+  padding: 9px 0; border-bottom: 1px solid var(--border-sub); gap: 12px; }
 .views li:last-child { border-bottom: none; }
-.views a { color: #1b5e91; text-decoration: none; font-size: 14px; }
+.views a { color: var(--link); text-decoration: none; font-size: 14px; }
 .views a:hover { text-decoration: underline; }
-.meta { font-size: 12px; color: #43536a; white-space: nowrap; }
+.meta { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .quick-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-.form { display: flex; flex-direction: column; gap: 10px; }
+.form { display: flex; flex-direction: column; gap: 11px; }
 .form label { display: flex; flex-direction: column; gap: 4px;
-  font-size: 12.5px; font-weight: 600; color: #2b3a4b; }
-.form input[type="text"], .form input[type="number"], .form input[type="file"] {
-  font-size: 13px; padding: 6px 8px; border: 1px solid #cbd5e1;
-  border-radius: 5px; background: #fbfcfd; color: #1d2733; }
+  font-size: 12px; font-weight: 600; color: var(--text); }
+.form input[type="text"], .form input[type="password"],
+.form input[type="number"], .form input[type="file"] {
+  font-size: 13px; padding: 7px 10px; border: 1px solid var(--border);
+  border-radius: 4px; background: var(--bg); color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .form .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; }
 .form label.check { flex-direction: row; align-items: center; gap: 8px;
   font-weight: 500; cursor: pointer; }
-.btn-primary, .btn-secondary, .btn-link {
-  display: inline-block; padding: 7px 13px; border-radius: 5px; font-size: 13px;
+.btn-primary, .btn-secondary, .btn-link, .btn-danger-outline {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 7px 13px; border-radius: 4px; font-size: 12.5px;
   font-weight: 600; cursor: pointer; text-decoration: none; border: 1px solid; }
-.btn-primary { background: #1b5e91; border-color: #164c75; color: #ffffff; }
-.btn-primary:hover { background: #164c75; }
+.btn-primary { background: var(--primary); border-color: var(--primary); color: var(--primary-text); }
+.btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
 .btn-primary:disabled { opacity: 0.6; cursor: wait; }
-.btn-secondary, .btn-link { background: #f1f5f9; border-color: #cbd5e1; color: #1d2733; }
-.btn-secondary:hover, .btn-link:hover { background: #e2e8f0; }
-.status-box { margin-top: 12px; padding: 10px 12px; border-radius: 6px;
+.btn-secondary, .btn-link { background: var(--surface); border-color: var(--border); color: var(--text); }
+.btn-secondary:hover, .btn-link:hover { background: var(--surface-subtle); }
+.btn-danger-outline { background: var(--surface); border-color: #fecaca; color: #991b1b; }
+.btn-danger-outline:hover { background: #fef2f2; border-color: #dc2626; }
+html.dark .btn-danger-outline { border-color: #7f1d1d; color: #fca5a5; }
+html.dark .btn-danger-outline:hover { background: rgba(127, 29, 29, 0.35); }
+.status-box { margin-top: 12px; padding: 10px 12px; border-radius: 4px;
   font-size: 12.5px; border: 1px solid; }
-.status-ok { background: #e2f0e3; border-color: #4a7d4f; color: #1e4620; }
-.status-err { background: #fbe3e1; border-color: #b03a2e; color: #7c211a; }
+.status-ok { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+.status-err { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+html.dark .status-ok { background: rgba(20, 83, 45, 0.4); border-color: #166534; color: #bbf7d0; }
+html.dark .status-err { background: rgba(127, 29, 29, 0.4); border-color: #991b1b; color: #fecaca; }
 .status-box a { color: inherit; font-weight: 700; }
-code { background: #eef2f6; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
-pre.cmd { margin: 0; padding: 10px 12px; background: #1d2733; color: #f1f5f9;
-  border-radius: 6px; font-size: 12px; overflow-x: auto; }
+code { background: var(--surface-subtle); padding: 1px 5px; border-radius: 3px;
+  font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+pre.cmd { margin: 0; padding: 10px 12px; background: #0f172a; color: #f1f5f9;
+  border-radius: 4px; font-size: 12px; overflow-x: auto; }
+"""
+
+_LOGIN_CSS = """
+.login-topbar { background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.login-brand { display: flex; align-items: center; gap: 12px; }
+.login-logo { width: 36px; height: 36px; object-fit: contain; background: #ffffff;
+  border: 1px solid var(--border); border-radius: 4px; padding: 2px; }
+.login-brand-row { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.login-sub { font-size: 11px; color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-top: 2px; }
+.login-actions { display: flex; align-items: center; gap: 8px; }
+.login-grid { max-width: 1100px; margin: 0 auto; padding: 36px 24px;
+  display: grid; grid-template-columns: 5fr 7fr; gap: 32px; align-items: start; }
+@media (max-width: 900px) { .login-grid { grid-template-columns: 1fr; } }
+.login-left h1 { margin: 10px 0 8px; font-size: 24px; font-weight: 600;
+  letter-spacing: -0.02em; }
+.login-lead { margin: 0 0 20px; font-size: 13.5px; line-height: 1.6; color: var(--muted); }
+.badge-ok, .badge-warn, .badge-neutral { display: inline-block; padding: 2px 8px;
+  border-radius: 4px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.03em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid; }
+.badge-ok { background: #f0fdf4; color: #166534; border-color: #bbf7d0; }
+.badge-warn { background: #fffbeb; color: #92400e; border-color: #fde68a; }
+.badge-neutral { background: var(--surface-subtle); color: var(--text); border-color: var(--border); }
+html.dark .badge-ok { background: rgba(20, 83, 45, 0.4); color: #bbf7d0; border-color: #166534; }
+html.dark .badge-warn { background: rgba(120, 53, 15, 0.4); color: #fde68a; border-color: #92400e; }
+.demo-card, .login-card { background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; overflow: hidden; }
+.demo-card-hdr { padding: 12px 16px; background: var(--surface-subtle);
+  border-bottom: 1px solid var(--border); display: flex; align-items: center;
+  justify-content: space-between; gap: 10px; }
+.demo-card-hdr h3 { margin: 0; font-size: 11.5px; text-transform: uppercase;
+  letter-spacing: 0.04em; }
+.demo-card-hdr p { margin: 2px 0 0; font-size: 11.5px; color: var(--muted); }
+.demo-list { display: flex; flex-direction: column; }
+.demo-row { width: 100%; text-align: left; background: transparent; border: none;
+  border-bottom: 1px solid var(--border-sub); padding: 11px 16px; cursor: pointer;
+  color: var(--text); font-family: inherit; }
+.demo-row:last-child { border-bottom: none; }
+.demo-row:hover { background: var(--surface-subtle); }
+.demo-row-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.demo-email { font-size: 12.5px; font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.demo-name { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.demo-secret { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.login-card { padding: 26px 28px; }
+.login-card-hdr { border-bottom: 1px solid var(--border); padding-bottom: 14px; margin-bottom: 16px; }
+.login-card-hdr h2 { margin: 0 0 4px; font-size: 18px; font-weight: 600; letter-spacing: -0.02em; }
+.login-card-hdr p { margin: 0; font-size: 12.5px; color: var(--muted); }
+.mfa-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
+.btn-full { width: 100%; padding: 10px 14px; margin-top: 4px; }
+.push-divider { margin: 18px 0 12px; text-align: center; border-bottom: 1px solid var(--border);
+  line-height: 0.1em; }
+.push-divider span { background: var(--surface); padding: 0 10px; font-size: 10.5px;
+  font-weight: 600; letter-spacing: 0.05em; color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.push-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.push-box { margin-top: 12px; padding: 12px 14px; background: var(--surface-subtle);
+  border: 1px solid var(--border); border-radius: 4px; font-size: 12.5px; }
+"""
+
+_LOGIN_JS = """
+g1BindThemeToggle();
+(function () {
+  var cfg = window.__G1_LOGIN_CFG || { next_url: '/', demo_accounts: [] };
+  var emailEl = document.getElementById('login-email');
+  var pwEl = document.getElementById('login-password');
+  var mfaEl = document.getElementById('login-mfa');
+  var alertEl = document.getElementById('login-alert');
+  var pushBox = document.getElementById('push-box');
+  var activeChallenge = null;
+
+  function showAlert(ok, text) {
+    alertEl.hidden = false;
+    alertEl.className = 'status-box ' + (ok ? 'status-ok' : 'status-err');
+    alertEl.textContent = text;
+  }
+
+  document.querySelectorAll('.demo-row').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var idx = Number(btn.getAttribute('data-demo-idx') || '0');
+      var acct = (cfg.demo_accounts || [])[idx];
+      if (!acct) return;
+      emailEl.value = acct.email;
+      pwEl.value = acct.passphrase;
+      mfaEl.value = acct.mfa_code;
+      showAlert(true, 'Loaded demo credentials for ' + acct.email + ' (' + acct.role + '). Click Authenticate & Open Console.');
+    });
+  });
+
+  var autoBtn = document.getElementById('btn-autofill-mfa');
+  if (autoBtn) {
+    autoBtn.addEventListener('click', function () {
+      var target = (emailEl.value || '').trim().toLowerCase();
+      var list = cfg.demo_accounts || [];
+      var match = list.find(function (a) { return a.email.toLowerCase() === target; }) || list[0];
+      if (!match) {
+        showAlert(false, 'Auto-fill is available only for sandbox demo accounts.');
+        return;
+      }
+      emailEl.value = match.email;
+      if (!pwEl.value) pwEl.value = match.passphrase;
+      mfaEl.value = match.mfa_code;
+      showAlert(true, 'Populated sandbox TOTP code (' + match.mfa_code + ') for ' + match.email + '.');
+    });
+  }
+
+  var devBtn = document.getElementById('btn-dev-login');
+  if (devBtn) {
+    devBtn.addEventListener('click', async function () {
+      devBtn.disabled = true;
+      try {
+        var r = await fetch('/api/auth/dev-quick-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: (emailEl.value || '').trim() || 'ops@g1163rt.ai' })
+        });
+        var d = await r.json();
+        if (!r.ok || !d.authenticated) throw new Error(d.error || ('HTTP ' + r.status));
+        window.location.href = cfg.next_url || '/';
+      } catch (e) {
+        showAlert(false, e.message || 'Quick login failed');
+        devBtn.disabled = false;
+      }
+    });
+  }
+
+  document.getElementById('form-login').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var btn = document.getElementById('btn-login-submit');
+    btn.disabled = true;
+    try {
+      var r = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: emailEl.value.trim(),
+          password: pwEl.value,
+          mfa_code: mfaEl.value.trim()
+        })
+      });
+      var d = await r.json();
+      if (!r.ok || !d.authenticated) throw new Error(d.error || ('HTTP ' + r.status));
+      window.location.href = cfg.next_url || '/';
+    } catch (err) {
+      showAlert(false, err.message || 'Authentication failed');
+      btn.disabled = false;
+    }
+  });
+
+  async function dispatchPush(provider) {
+    var pw = pwEl.value;
+    if (!pw) {
+      var m = (cfg.demo_accounts || []).find(function (a) {
+        return a.email.toLowerCase() === emailEl.value.trim().toLowerCase();
+      });
+      if (m) {
+        pw = m.passphrase;
+        pwEl.value = pw;
+      } else {
+        showAlert(false, 'Enter your operator passphrase before dispatching a federated push.');
+        return;
+      }
+    }
+    try {
+      var r = await fetch('/api/auth/push-challenge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: emailEl.value.trim(), password: pw, provider: provider })
+      });
+      var d = await r.json();
+      if (!r.ok || !d.challenge_id) throw new Error(d.error || ('HTTP ' + r.status));
+      activeChallenge = d;
+      pushBox.hidden = false;
+      pushBox.innerHTML =
+        '<div><strong>' + d.provider_title + '</strong> dispatched to <code>' + d.device + '</code> (' + d.endpoint + ').</div>' +
+        '<div style="margin:6px 0;">Confirm number match: <strong style="font-size:15px;">' + d.match_number + '</strong></div>' +
+        '<button type="button" class="btn-primary" id="btn-approve-push">Simulate Hardware Approval (' + d.match_number + ')</button>';
+      document.getElementById('btn-approve-push').addEventListener('click', async function () {
+        var vr = await fetch('/api/auth/push-verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ challenge_id: activeChallenge.challenge_id, match_number: activeChallenge.match_number })
+        });
+        var vd = await vr.json();
+        if (!vr.ok || !vd.authenticated) {
+          showAlert(false, vd.error || 'Push verification failed');
+          return;
+        }
+        window.location.href = cfg.next_url || '/';
+      });
+    } catch (err) {
+      showAlert(false, err.message || 'Push dispatch failed');
+    }
+  }
+
+  var duoBtn = document.getElementById('btn-push-duo');
+  var oktaBtn = document.getElementById('btn-push-okta');
+  if (duoBtn) duoBtn.addEventListener('click', function () { dispatchPush('duo'); });
+  if (oktaBtn) oktaBtn.addEventListener('click', function () { dispatchPush('okta'); });
+})();
 """
 
 _INDEX_JS = """
+g1BindThemeToggle();
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c =>
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));

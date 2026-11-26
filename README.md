@@ -157,13 +157,18 @@ docker compose up -d --build
 
 ```text
 G1-Manifest HTTP Surface (:8080)
-├── GET  /                           Dashboard & Available Witness Pages
+├── GET  /                           MFA Login Portal (unauthenticated) / Witness Dashboard (authenticated)
+├── GET  /login                      Zero-Trust PBKDF2 + 6-Digit TOTP & Push Login Portal
+├── GET  /logout                     Clear session cookie and return to /login
 ├── GET  /health                     Container health check ({"status":"ok","views":N})
-├── GET  /<view>.html                Standalone offline-safe HTML witness page
+├── GET  /<view>.html                Standalone offline-safe HTML witness page (session-gated)
 ├── GET  /api/views                  JSON metadata list of rendered witness pages
 ├── GET  /api/keys/public.pem        Download active Ed25519 verification public key
-├── GET  /api/agent/windows.cmd      1-click Windows workstation scanner (no Python)
-├── GET  /api/agent/macos.command    1-click macOS workstation scanner
+├── GET  /api/agent/windows.cmd      1-click Windows workstation scanner (embeds scoped ingest token)
+├── GET  /api/agent/macos.command    1-click macOS workstation scanner (embeds scoped ingest token)
+├── POST /api/auth/login             PBKDF2-HMAC-SHA256 + 6-digit TOTP authentication
+├── POST /api/auth/push-challenge    Cisco Duo / Okta FastPass push dispatch
+├── POST /api/auth/push-verify       2-digit number-match push verification
 ├── POST /api/scan/estate            Ingest telemetry, reconcile, sign, and render
 ├── POST /api/scan/host              Run container host scan
 ├── POST /api/scan/demo              Re-run bundled demo estate scan
@@ -171,6 +176,17 @@ G1-Manifest HTTP Surface (:8080)
 ├── POST /api/render                 Verify & render uploaded graph.json or envelope.json
 └── POST /api/keys/rotate            Rotate server Ed25519 keypair
 ```
+
+### Operator MFA Login Portal & Sandbox Demo Accounts (`http://127.0.0.1:8088`)
+
+In local evaluation mode (disabled automatically when `MANIFEST_PRODUCTION=true`), the login portal includes click-to-fill sandbox accounts matching **G1-Warrant**:
+
+| Principal (`email` / alias) | Role | Sandbox Passphrase | 6-Digit TOTP | Access Scope |
+| :--- | :--- | :--- | :--- | :--- |
+| `ops@g1163rt.ai` (`admin`) | `AUTHORIZING_OFFICIAL` | `G1ManifestDemo2026!` | `482910` | Full scan, render, and key rotation |
+| `sre@g1163rt.ai` (`operator1`) | `SERVICE_OWNER` | `G1ServiceOwner2026!` | `319420` | Full scan, render, and key rotation |
+| `mac@g1163rt.ai` | `OPERATOR` | `G1Operator2026!` | `123456` | Full scan, render, and key rotation |
+| `auditor@g1163rt.ai` (`auditor1`) | `AUDITOR` | `G1Auditor2026!` | `654321` | Read-only witness inspection (`403` on mutations) |
 
 ---
 

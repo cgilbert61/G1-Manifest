@@ -443,7 +443,12 @@ def cmd_serve(args) -> int:
         _render_demo_view(demo_out)
         print(f"rendered demo witness -> {demo_out}", flush=True)
 
-    server = serve_views(views_dir, host=args.host, port=args.port)
+    server = serve_views(
+        views_dir,
+        host=args.host,
+        port=args.port,
+        require_auth=not getattr(args, "no_auth", False),
+    )
     print(
         f"G1 Manifest witness viewer listening on http://{args.host}:{args.port} "
         f"(serving {views_dir.resolve()})",
@@ -522,7 +527,7 @@ def main(argv=None) -> int:
     p.set_defaults(func=cmd_scan_host)
 
     p = sub.add_parser(
-        "serve", help="serve rendered HTML witness pages over HTTP (read-only)"
+        "serve", help="serve rendered HTML witness pages over HTTP (MFA gated)"
     )
     p.add_argument("--dir", default="views", help="directory of .html witness pages")
     p.add_argument("--host", default="0.0.0.0")
@@ -531,6 +536,11 @@ def main(argv=None) -> int:
         "--demo",
         action="store_true",
         help="render the bundled demo estate witness page into --dir on startup",
+    )
+    p.add_argument(
+        "--no-auth",
+        action="store_true",
+        help="disable the operator MFA login portal (unauthenticated LAN mode)",
     )
     p.set_defaults(func=cmd_serve)
 
