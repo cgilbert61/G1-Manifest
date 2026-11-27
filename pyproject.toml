@@ -13,6 +13,7 @@ dependencies = ["cryptography>=42"]
 
 [project.optional-dependencies]
 host = ["psutil>=5.9"]
+fuzz = ["hypothesis>=6.100"]
 
 [project.scripts]
 estate-graph = "estate_graph.cli:main"

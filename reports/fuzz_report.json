@@ -1,0 +1,59 @@
+{
+  "project": "G1-Manifest",
+  "generated_at": "2026-11-27T14:44:06Z",
+  "environment": {
+    "platform": "win32",
+    "python": "3.13.9",
+    "pytest": "9.2.0",
+    "hypothesis": "6.170.19"
+  },
+  "fuzzers": {
+    "hypothesis": {
+      "status": "EXECUTED",
+      "suite": "fuzz/test_hypothesis_fuzz.py",
+      "targets_total": 10,
+      "targets_passed": 10,
+      "targets_failed": 0,
+      "total_passing_examples": 1500,
+      "duration_seconds": 5.07,
+      "targets": [
+        {"name": "test_fuzz_verify_envelope_fails_closed_on_arbitrary_input", "passing_examples": 150, "failures": 0, "generate_seconds": 0.41},
+        {"name": "test_fuzz_verify_envelope_structured_forgeries_rejected", "passing_examples": 150, "failures": 0, "generate_seconds": 0.33},
+        {"name": "test_fuzz_parse_flow_logs_never_crashes", "passing_examples": 150, "failures": 0, "generate_seconds": 0.18},
+        {"name": "test_fuzz_parse_hubble_never_crashes", "passing_examples": 150, "failures": 0, "generate_seconds": 0.07},
+        {"name": "test_fuzz_parse_uninstall_keys_never_crashes", "passing_examples": 150, "failures": 0, "generate_seconds": 0.39},
+        {"name": "test_fuzz_parse_distributions_never_crashes", "passing_examples": 150, "failures": 0, "generate_seconds": 0.49},
+        {"name": "test_fuzz_sideloaded_dll_never_masked_by_system_dll", "passing_examples": 150, "failures": 0, "generate_seconds": 0.26},
+        {"name": "test_fuzz_render_html_deterministic_and_script_safe", "passing_examples": 150, "failures": 0, "generate_seconds": 0.24},
+        {"name": "test_fuzz_safe_html_name_prevents_traversal", "passing_examples": 150, "failures": 0, "generate_seconds": 0.08},
+        {"name": "test_fuzz_sign_verify_roundtrip", "passing_examples": 150, "failures": 0, "generate_seconds": 0.14}
+      ]
+    },
+    "atheris": {
+      "status": "SKIPPED",
+      "reason": "Docker Desktop daemon not running locally; configured in fuzz/Dockerfile.atheris and .github/workflows/ci.yml (atheris-fuzz job)",
+      "harnesses": [
+        "fuzz/atheris_harnesses/fuzz_verify_envelope.py",
+        "fuzz/atheris_harnesses/fuzz_parsers.py",
+        "fuzz/atheris_harnesses/fuzz_render_html.py",
+        "fuzz/atheris_harnesses/fuzz_host_modules.py"
+      ]
+    }
+  },
+  "remediated_findings": [
+    {
+      "id": "FUZZ-001",
+      "file": "estate_graph/sources/hubble.py",
+      "minimized_input": "0",
+      "issue": "AttributeError on non-dict JSON scalar line in Hubble JSONL parser",
+      "status": "FIXED"
+    },
+    {
+      "id": "FUZZ-002",
+      "file": "estate_graph/serve.py",
+      "minimized_input": "0..0",
+      "issue": "_safe_html_name left consecutive '..' sequences inside sanitized filename stems",
+      "status": "FIXED"
+    }
+  ]
+}

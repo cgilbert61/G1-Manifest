@@ -246,6 +246,7 @@ G1-Manifest integrates with **G1-Docket** and **G1-Warrant** exclusively through
 
 - **Health Probe:** `GET /health` (`200 OK` JSON) wired into `Dockerfile` `HEALTHCHECK` and `k8s/deployment.yaml` liveness/readiness probes.
 - **Empirical Verification Scorecard:** Run `python scripts/run_all_verifications.py` to execute unit/integration tests, consumer conformance, demo, compliance harness, and latency benchmarks into [`reports/verification_scorecard.json`](reports/verification_scorecard.json).
+- **Fuzz Testing Report ([Full Report](reports/fuzz_report.md)):** Property-based fuzzing via **Hypothesis** (`fuzz/test_hypothesis_fuzz.py`: **10/10 targets PASS**, `1,500` generated examples, 2 edge cases caught & fixed) and coverage-guided `libFuzzer` harnesses via **Atheris** (`fuzz/atheris_harnesses/`, running in GitHub Actions CI & `fuzz/Dockerfile.atheris`).
 - **Latest Empirical DevSecOps Scan ([Full Report](reports/devsecops_scan_report.md)):**
 
 | Scanner | Scope | Status | Empirical Result |
@@ -255,7 +256,9 @@ G1-Manifest integrates with **G1-Docket** and **G1-Warrant** exclusively through
 | **Checkov** | Dockerfile, Helm, Kubernetes, Terraform | `EXECUTED` | **188 passed, 0 failed** (`70/70` Dockerfile, `91/91` K8s, `25/25` Terraform, `2/2` Helm) |
 | **Trivy Image** | `g1-manifest:latest` (Alpine 3.24) OS + Python CVEs & secrets | `EXECUTED` | **0 CRITICAL / 0 HIGH**, **0 Python CVEs**, **0 secrets** (5 MEDIUM, 1 LOW) |
 | **Trivy FS** | Repository IaC misconfigurations, vulns & secrets | `EXECUTED` | **0 CRITICAL / 0 HIGH**, **0 vulns**, **0 secrets** (3 MEDIUM) |
-| **oss-scanner** | Standalone OSS/license scanner | `SKIPPED` | Not installed locally |
+| **Hypothesis Fuzz** | 10 property-based fuzz targets (`fuzz/`) | `EXECUTED` | **10/10 PASS** (`1,500` examples, 2 edge cases remediated) |
+| **Atheris Fuzz** | 4 coverage-guided `libFuzzer` harnesses (`fuzz/atheris_harnesses/`) | `SKIPPED` | Local Docker daemon stopped; runs automatically in GitHub Actions CI (`atheris-fuzz`) |
+| **oss-scanner** | Standalone OSS/license scanner | `SKIPPED` | Not installed locally (enrolled via `anthropics/oss-scanner#1615`) |
 
 ---
 

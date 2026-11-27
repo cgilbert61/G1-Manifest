@@ -24,11 +24,13 @@ jobs:
       - name: Install package and test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[host]" pytest build
+          pip install -e ".[host,fuzz]" pytest build
       - name: Run unit and integration test suite
         run: pytest -v
       - name: Run consumer conformance suite
         run: pytest -v conformance/
+      - name: Run Hypothesis property-based fuzz suite
+        run: pytest -v fuzz/
       - name: Run reproducible end-to-end demo
         run: python -m examples.run_demo
       - name: Build and verify standalone wheel
@@ -45,3 +47,18 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build G1-Manifest Docker image
         run: docker build -t g1-manifest:ci .
+
+  atheris-fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package and Atheris
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[host]" atheris
+      - name: Run Atheris coverage-guided fuzz harnesses
+        run: python fuzz/run_atheris.py --runs 2000

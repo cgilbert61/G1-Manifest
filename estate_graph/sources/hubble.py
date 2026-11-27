@@ -85,15 +85,26 @@ def parse_hubble(text: str) -> list[FlowObservation]:
             obj = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if not isinstance(obj, dict):
+            continue
         flow = obj.get("flow", obj)
+        if not isinstance(flow, dict):
+            continue
         if flow.get("verdict") not in (None, "FORWARDED"):
             continue
-        src = service_identity(flow.get("source") or {})
-        dst = service_identity(flow.get("destination") or {})
+        raw_src = flow.get("source")
+        raw_dst = flow.get("destination")
+        if not isinstance(raw_src, dict) or not isinstance(raw_dst, dict):
+            continue
+        src = service_identity(raw_src)
+        dst = service_identity(raw_dst)
         if not src or not dst or src == dst:
             continue
         port, protocol = _port_and_protocol(flow)
-        ts = parse_ts(obj.get("time") or flow.get("time") or 0)
+        try:
+            ts = parse_ts(obj.get("time") or flow.get("time") or 0)
+        except (ValueError, TypeError):
+            ts = 0
         key = (src, dst, port, protocol)
         obs = agg.get(key)
         if obs is None:

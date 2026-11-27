@@ -53,7 +53,10 @@ def _safe_html_name(raw: str, default: str = "estate_view") -> str:
     stem = (raw or "").strip()
     if stem.lower().endswith(".html"):
         stem = stem[:-5]
-    stem = _SAFE_STEM.sub("-", stem).strip(".-")
+    stem = _SAFE_STEM.sub("-", stem)
+    while ".." in stem:
+        stem = stem.replace("..", ".")
+    stem = stem.strip(".-")
     if not stem:
         stem = default
     return f"{stem}.html"
