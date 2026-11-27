@@ -1153,6 +1153,12 @@ def render_explorer_html(
         "</nav>"
         '<main class="workspace">'
         '<aside class="sidebar" id="sidebar">'
+        '<div class="card" id="scan-selector-card" hidden>'
+        '<h3>Loaded Scan / Signed Envelope</h3>'
+        '<div class="input-row"><select id="sel-env-a"></select></div>'
+        '<div class="input-row" id="row-env-b"><select id="sel-env-b"></select></div>'
+        '<div class="input-row"><a class="btn-secondary" id="btn-dl-env" href="#" download hidden>Download .envelope.json</a></div>'
+        "</div>"
         '<div id="view-controls"></div>'
         '<div id="view-details"></div>'
         "</aside>"
@@ -1231,6 +1237,9 @@ _EXPLORER_JS = r"""
     view: "diff",
     data: null,
     demoCache: null,
+    storedEnvelopes: [],
+    envA: "__demo__",
+    envB: "__demo__",
     egoCenter: "",
     egoRings: 1,
     findingIdx: 0,
@@ -1630,22 +1639,91 @@ _EXPLORER_JS = r"""
     fitView();
   }
 
+  function populateEnvelopeSelectors() {
+    const card = document.getElementById("scan-selector-card");
+    const selA = document.getElementById("sel-env-a");
+    const selB = document.getElementById("sel-env-b");
+    const rowB = document.getElementById("row-env-b");
+    const dlBtn = document.getElementById("btn-dl-env");
+    if (!card || !selA || !selB) return;
+    card.hidden = false;
+    const opts = [
+      `<option value="__demo__">Bundled Demo Estate (A vs B)</option>`,
+      ...STATE.storedEnvelopes.map((e) =>
+        `<option value="${esc(e.id)}">${esc(e.id)} (${e.size_kb} KB)</option>`
+      ),
+    ].join("");
+    selA.innerHTML = opts;
+    selB.innerHTML = opts;
+    selA.value = STATE.envA;
+    selB.value = STATE.envB;
+    rowB.style.display = STATE.view === "diff" ? "flex" : "none";
+    const found = STATE.storedEnvelopes.find((e) => e.id === STATE.envA);
+    if (found && dlBtn) {
+      dlBtn.href = found.download_url;
+      dlBtn.hidden = false;
+    } else if (dlBtn) {
+      dlBtn.hidden = true;
+    }
+  }
+
+  async function initStoredEnvelopes() {
+    if (BOOT.initial) return;
+    try {
+      const resp = await fetch(`${API}/envelopes`);
+      if (resp.ok) {
+        const j = await resp.json();
+        STATE.storedEnvelopes = Array.isArray(j.envelopes) ? j.envelopes : [];
+      }
+    } catch (_) {}
+    const params = new URLSearchParams(window.location.search);
+    const reqEnv = params.get("envelope");
+    if (reqEnv && STATE.storedEnvelopes.some((e) => e.id === reqEnv)) {
+      STATE.envA = reqEnv;
+      STATE.envB = reqEnv;
+      STATE.view = "zoom";
+      document.querySelectorAll(".tab").forEach((b) => {
+        b.classList.toggle("active", b.dataset.view === "zoom");
+      });
+    }
+    populateEnvelopeSelectors();
+    const selA = document.getElementById("sel-env-a");
+    const selB = document.getElementById("sel-env-b");
+    if (selA) selA.onchange = () => {
+      STATE.envA = selA.value;
+      STATE.egoCenter = "";
+      STATE.zoomLevel = "estate";
+      STATE.zoomParent = null;
+      populateEnvelopeSelectors();
+      loadCurrentView();
+    };
+    if (selB) selB.onchange = () => {
+      STATE.envB = selB.value;
+      loadCurrentView();
+    };
+  }
+
   async function loadCurrentView() {
     if (BOOT.initial && BOOT.initial[STATE.view] && !STATE.demoCache) {
       applyViewData(BOOT.initial[STATE.view]);
       return;
     }
+    populateEnvelopeSelectors();
     const flt = getFilters();
     try {
       if (!STATE.demoCache) {
         const res = await fetch(`${API}/demo`);
         if (res.ok) STATE.demoCache = await res.json();
       }
-      if (!STATE.demoCache) return;
-      const body = Object.assign({}, flt, { use_demo: true });
+      const isDemo = STATE.envA === "__demo__";
+      const body = Object.assign({}, flt, {
+        use_demo: isDemo,
+        envelope_name: isDemo ? "" : STATE.envA,
+        envelope_b_name: STATE.envB === "__demo__" ? "" : STATE.envB,
+      });
       let endpoint = `${API}/${STATE.view}`;
       if (STATE.view === "ego") {
-        body.center_node = STATE.egoCenter || STATE.demoCache.default_center || "checkout-api";
+        body.center_node = STATE.egoCenter || (isDemo && STATE.demoCache ? STATE.demoCache.default_center : "");
         body.rings = STATE.egoRings;
       } else if (STATE.view === "findings") {
         body.selected_index = STATE.findingIdx;
@@ -1660,7 +1738,10 @@ _EXPLORER_JS = r"""
         body: JSON.stringify(body),
       });
       const json = await resp.json();
-      if (json.ok && json.result) applyViewData(json.result);
+      if (json.ok && json.result) {
+        if (STATE.view === "ego" && json.result.center) STATE.egoCenter = json.result.center;
+        applyViewData(json.result);
+      }
     } catch (err) {
       hud.textContent = "Error loading view: " + err;
     }
@@ -1680,6 +1761,6 @@ _EXPLORER_JS = r"""
 
   initWebGL();
   resize();
-  loadCurrentView();
+  initStoredEnvelopes().then(() => loadCurrentView());
 })();
 """

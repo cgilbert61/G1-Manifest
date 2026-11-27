@@ -361,6 +361,41 @@ def test_explorer_http_endpoints_and_cli(demo_pair, tmp_path: Path):
                 assert data["ok"] is True
                 assert data["result"]["proof"]["status"] == "verified"
 
+        # Stored scan envelopes: run demo scan -> persisted -> listed -> downloadable -> queryable
+        demo_req = urllib.request.Request(
+            f"{base}/api/scan/demo",
+            data=b"{}",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(demo_req) as resp:
+            demo_res = json.loads(resp.read().decode("utf-8"))
+            assert demo_res["ok"] is True
+            assert any(v.get("has_envelope") for v in demo_res["views"])
+
+        with urllib.request.urlopen(f"{base}/api/explorer/envelopes") as resp:
+            env_list = json.loads(resp.read().decode("utf-8"))
+            assert env_list["ok"] is True
+            ids = [e["id"] for e in env_list["envelopes"]]
+            assert "demo_view" in ids
+
+        with urllib.request.urlopen(
+            f"{base}/api/explorer/envelopes/demo_view.envelope.json"
+        ) as resp:
+            raw_env = json.loads(resp.read().decode("utf-8"))
+            assert "payload" in raw_env and "signatures" in raw_env
+
+        stored_req = urllib.request.Request(
+            f"{base}/api/explorer/zoom",
+            data=json.dumps({"envelope_name": "demo_view", "level": "estate"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(stored_req) as resp:
+            zdata = json.loads(resp.read().decode("utf-8"))
+            assert zdata["ok"] is True
+            assert zdata["result"]["proof"]["status"] == "verified"
+
         # Forged envelope must return 400
         bad_req = urllib.request.Request(
             f"{base}/api/explorer/diff",

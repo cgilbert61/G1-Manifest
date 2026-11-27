@@ -78,14 +78,82 @@ def list_views(views_dir: Path) -> list[Path]:
     )
 
 
+def _envelopes_dir(views_dir: Path) -> Path:
+    d = views_dir / "envelopes"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _save_scan_envelope(
+    views_dir: Path,
+    view_filename: str,
+    envelope: dict,
+    declared_json: str | dict | None = None,
+) -> Path:
+    """Persist a signed DSSE envelope alongside its rendered witness page."""
+    env_dir = _envelopes_dir(views_dir)
+    stem = Path(view_filename).stem
+    env_path = env_dir / f"{stem}.envelope.json"
+    env_path.write_text(
+        json.dumps(envelope, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    if declared_json is not None:
+        decl_path = env_dir / f"{stem}.declared.json"
+        if isinstance(declared_json, str):
+            decl_path.write_text(declared_json, encoding="utf-8")
+        else:
+            decl_path.write_text(
+                json.dumps(declared_json, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+    return env_path
+
+
+def _list_stored_envelopes(views_dir: Path) -> list[dict]:
+    env_dir = views_dir / "envelopes"
+    if not env_dir.is_dir():
+        return []
+    items = []
+    for path in sorted(env_dir.glob("*.envelope.json")):
+        stem = path.name[: -len(".envelope.json")]
+        stat = path.stat()
+        has_decl = (env_dir / f"{stem}.declared.json").is_file()
+        has_view = (views_dir / f"{stem}.html").is_file()
+        items.append(
+            {
+                "id": stem,
+                "filename": path.name,
+                "size_kb": max(1, round(stat.st_size / 1024)),
+                "updated": datetime.fromtimestamp(
+                    stat.st_mtime, tz=timezone.utc
+                ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "has_declared": has_decl,
+                "view_url": f"/{stem}.html" if has_view else None,
+                "download_url": f"/api/explorer/envelopes/{quote(path.name)}",
+            }
+        )
+    return items
+
+
 def _views_metadata(views_dir: Path) -> list[dict]:
     items = []
+    env_dir = views_dir / "envelopes"
     for path in list_views(views_dir):
         stat = path.stat()
+        stem = path.stem
+        has_env = (env_dir / f"{stem}.envelope.json").is_file()
         items.append(
             {
                 "name": path.name,
+                "stem": stem,
                 "url": f"/{path.name}",
+                "has_envelope": has_env,
+                "explore_url": f"/explorer?envelope={quote(stem)}" if has_env else None,
+                "envelope_url": (
+                    f"/api/explorer/envelopes/{quote(stem + '.envelope.json')}"
+                    if has_env
+                    else None
+                ),
                 "size_kb": max(1, round(stat.st_size / 1024)),
                 "updated": datetime.fromtimestamp(
                     stat.st_mtime, tz=timezone.utc
@@ -111,9 +179,18 @@ def render_index(
     rows: list[str] = []
     for item in views:
         name = html.escape(item["name"])
+        extra_links = ""
+        if item.get("explore_url"):
+            extra_links += (
+                f' · <a href="{html.escape(item["explore_url"])}">Explore in WebGL &rarr;</a>'
+            )
+        if item.get("envelope_url"):
+            extra_links += (
+                f' · <a href="{html.escape(item["envelope_url"])}" download>.envelope.json</a>'
+            )
         rows.append(
             f'<li><a href="/{name}"><strong>{name}</strong></a> '
-            f'<span class="meta">{item["size_kb"]} KB · updated {item["updated"]}</span></li>'
+            f'<span class="meta">{item["size_kb"]} KB · updated {item["updated"]}{extra_links}</span></li>'
         )
     views_html = (
         '<ul class="views" id="views-list">' + "".join(rows) + "</ul>"
@@ -419,6 +496,8 @@ def _run_estate_scan(body: dict, views_dir: Path, keys_dir: Path) -> dict:
         render_html(render_target, reconcile_report=report, verification=verification),
         encoding="utf-8",
     )
+    if should_sign:
+        _save_scan_envelope(views_dir, filename, envelope, declared_json=declared_text)
     return {
         "ok": True,
         "view": filename,
@@ -484,6 +563,7 @@ def _run_host_scan(body: dict, views_dir: Path, keys_dir: Path) -> dict:
         ),
         encoding="utf-8",
     )
+    _save_scan_envelope(views_dir, filename, envelope)
     return {
         "ok": True,
         "view": filename,
@@ -498,11 +578,42 @@ def _run_host_scan(body: dict, views_dir: Path, keys_dir: Path) -> dict:
     }
 
 
-def _run_demo_scan(views_dir: Path) -> dict:
-    from .cli import _render_demo_view
+def _run_demo_scan(views_dir: Path, keys_dir: Path | None = None) -> dict:
+    from .cli import DEMO_DIR, build_graph
 
     filename = "demo_view.html"
-    _render_demo_view(views_dir / filename)
+    now = int(time.time())
+    graph, declared = build_graph(
+        DEMO_DIR / "declared_model.json",
+        [DEMO_DIR / "vpc_flow_logs.txt"],
+        [DEMO_DIR / "hubble.jsonl"],
+        [DEMO_DIR / "lineage.json"],
+        issued_at=now,
+    )
+    report = reconcile(graph, declared)
+    kdir = keys_dir or (views_dir.parent / "keys")
+    priv_path, pub_path = _ensure_keys(kdir)
+    envelope = sign_graph(graph, load_private_key(priv_path), ttl_seconds=86400)
+    pub = load_public_key(pub_path)
+    verified = verify_envelope(envelope, pub, now=now)
+    (views_dir / filename).write_text(
+        render_html(
+            verified,
+            reconcile_report=report,
+            verification={
+                "status": "verified",
+                "keyid": keyid_for(pub),
+                "detail": "Signature valid and the graph is within its validity window.",
+            },
+        ),
+        encoding="utf-8",
+    )
+    _save_scan_envelope(
+        views_dir,
+        filename,
+        envelope,
+        declared_json=(DEMO_DIR / "declared_model.json").read_text(encoding="utf-8"),
+    )
     return {
         "ok": True,
         "view": filename,
@@ -658,6 +769,7 @@ def _run_ingest_host(body: dict, views_dir: Path, keys_dir: Path) -> dict:
         ),
         encoding="utf-8",
     )
+    _save_scan_envelope(views_dir, filename, envelope)
     return {
         "ok": True,
         "view": filename,
@@ -894,6 +1006,13 @@ def _run_render_artifact(body: dict, views_dir: Path, keys_dir: Path) -> dict:
         render_html(graph, reconcile_report=report, verification=verification),
         encoding="utf-8",
     )
+    if is_envelope:
+        _save_scan_envelope(
+            views_dir,
+            filename,
+            data,
+            declared_json=str(body["declared"]) if body.get("declared") else None,
+        )
     return {
         "ok": True,
         "view": filename,
@@ -1171,6 +1290,7 @@ def _run_ingest_once(views_dir: Path, keys_dir: Path, cfg_path: Path) -> dict:
         ),
         encoding="utf-8",
     )
+    _save_scan_envelope(views_dir, filename, env)
     return {
         "ok": True,
         "view": filename,
@@ -1255,7 +1375,23 @@ def _resolve_explorer_pubkey(body: dict, keys_dir: Path):
     return load_public_key(pub_path)
 
 
-def _run_explorer_query(path: str, body: dict, keys_dir: Path) -> dict:
+def _load_stored_envelope(views_dir: Path, name: str) -> tuple[dict, str | None]:
+    safe_stem = _safe_html_name(name, "scan")[:-5]
+    env_dir = _envelopes_dir(views_dir).resolve()
+    env_path = (env_dir / f"{safe_stem}.envelope.json").resolve()
+    if env_path.parent != env_dir or not env_path.is_file():
+        raise ValueError(f"stored envelope {name!r} not found")
+    envelope = json.loads(env_path.read_text(encoding="utf-8"))
+    decl_path = (env_dir / f"{safe_stem}.declared.json").resolve()
+    decl_text = (
+        decl_path.read_text(encoding="utf-8")
+        if (decl_path.parent == env_dir and decl_path.is_file())
+        else None
+    )
+    return envelope, decl_text
+
+
+def _run_explorer_query(path: str, body: dict, views_dir: Path, keys_dir: Path) -> dict:
     from .explorer import (
         build_diff_view,
         build_ego_view,
@@ -1264,10 +1400,18 @@ def _run_explorer_query(path: str, body: dict, keys_dir: Path) -> dict:
         load_verified_or_expired,
         search_nodes,
     )
+    from .sources.declared import DeclaredModel
 
-    use_demo = bool(body.get("use_demo")) or (
-        "envelope" not in body and "envelope_a" not in body
-    )
+    env_name = str(body.get("envelope_name") or "").strip()
+    env_b_name = str(body.get("envelope_b_name") or "").strip()
+    use_demo = (
+        bool(body.get("use_demo"))
+        and not env_name
+        and not env_b_name
+        and "envelope" not in body
+        and "envelope_a" not in body
+    ) or (env_name == "__demo__")
+
     demo = _explorer_demo_bundle(keys_dir) if use_demo else None
     pub = demo["pub"] if demo else _resolve_explorer_pubkey(body, keys_dir)
     now = body.get("now")
@@ -1284,14 +1428,38 @@ def _run_explorer_query(path: str, body: dict, keys_dir: Path) -> dict:
     }
 
     if path == "/api/explorer/diff":
-        env_a = body.get("envelope_a") if not use_demo else demo["env_a"]
-        env_b = body.get("envelope_b") if not use_demo else demo["env_b"]
+        if env_name and env_name != "__demo__":
+            env_a, _ = _load_stored_envelope(views_dir, env_name)
+        elif isinstance(body.get("envelope_a"), dict):
+            env_a = body["envelope_a"]
+        else:
+            demo = demo or _explorer_demo_bundle(keys_dir)
+            env_a = demo["env_a"]
+
+        if env_b_name and env_b_name != "__demo__":
+            env_b, _ = _load_stored_envelope(views_dir, env_b_name)
+        elif isinstance(body.get("envelope_b"), dict):
+            env_b = body["envelope_b"]
+        elif env_name and env_name != "__demo__":
+            # Diff against itself if user only selected one stored scan
+            env_b = env_a
+        else:
+            demo = demo or _explorer_demo_bundle(keys_dir)
+            env_b = demo["env_b"]
+
         if not isinstance(env_a, dict) or not isinstance(env_b, dict):
             raise ValueError("envelope_a and envelope_b JSON objects are required")
         result = build_diff_view(env_a, env_b, pub, now=now, **flt)
         return {"ok": True, "result": result}
 
-    env = body.get("envelope") if not use_demo else demo["env_b"]
+    stored_decl_text: str | None = None
+    if env_name and env_name != "__demo__":
+        env, stored_decl_text = _load_stored_envelope(views_dir, env_name)
+    elif isinstance(body.get("envelope"), dict):
+        env = body["envelope"]
+    else:
+        demo = demo or _explorer_demo_bundle(keys_dir)
+        env = demo["env_b"]
     if not isinstance(env, dict):
         raise ValueError("envelope JSON object is required")
     graph, proof = load_verified_or_expired(env, pub, now=now)
@@ -1306,7 +1474,8 @@ def _run_explorer_query(path: str, body: dict, keys_dir: Path) -> dict:
 
     if path == "/api/explorer/ego":
         center = str(body.get("center_node") or "").strip()
-        if not center and graph.nodes:
+        node_ids = {n.id for n in graph.nodes}
+        if (not center or center not in node_ids) and graph.nodes:
             center = graph.nodes[0].id
         rings = int(body.get("rings") or 1)
         result = build_ego_view(graph, proof, center, rings=rings, **flt)
@@ -1318,10 +1487,12 @@ def _run_explorer_query(path: str, body: dict, keys_dir: Path) -> dict:
             declared = parse_declared(
                 json.loads(raw_decl) if isinstance(raw_decl, str) else raw_decl
             )
+        elif stored_decl_text:
+            declared = parse_declared(json.loads(stored_decl_text))
         elif demo:
             declared = demo["declared"]
         else:
-            raise ValueError("declared model JSON is required for findings view")
+            declared = DeclaredModel(nodes=[], pairs=set(), ip_to_service={})
         selected_index = int(body.get("selected_index") or 0)
         result = build_findings_view(
             graph, proof, declared, selected_index=selected_index, **flt
@@ -1548,6 +1719,42 @@ def make_handler(
                     },
                 )
                 return
+            if path == "/api/explorer/envelopes":
+                self._send_json(
+                    HTTPStatus.OK,
+                    {"ok": True, "envelopes": _list_stored_envelopes(root)},
+                )
+                return
+            if path.startswith("/api/explorer/envelopes/"):
+                fname = path[len("/api/explorer/envelopes/") :]
+                if "/" in fname or "\\" in fname or not fname.endswith(".envelope.json"):
+                    self._send(
+                        HTTPStatus.NOT_FOUND,
+                        "text/plain; charset=utf-8",
+                        b"Not Found\n",
+                    )
+                    return
+                env_dir = _envelopes_dir(root).resolve()
+                target = (env_dir / fname).resolve()
+                if target.parent != env_dir or not target.is_file():
+                    self._send(
+                        HTTPStatus.NOT_FOUND,
+                        "text/plain; charset=utf-8",
+                        b"Not Found\n",
+                    )
+                    return
+                self._send(
+                    HTTPStatus.OK,
+                    "application/json; charset=utf-8",
+                    target.read_bytes(),
+                    extra_headers=[
+                        (
+                            "Content-Disposition",
+                            f'attachment; filename="{target.name}"',
+                        )
+                    ],
+                )
+                return
             if path == "/api/views":
                 self._send_json(HTTPStatus.OK, {"views": _views_metadata(root)})
                 return
@@ -1752,7 +1959,7 @@ def make_handler(
 
                 if path.startswith("/api/explorer/"):
                     try:
-                        res = _run_explorer_query(path, body, kdir)
+                        res = _run_explorer_query(path, body, root, kdir)
                     except (VerificationError, KeyError, ValueError) as exc:
                         self._send_json(
                             HTTPStatus.BAD_REQUEST,
@@ -1764,7 +1971,7 @@ def make_handler(
                 elif path == "/api/scan/host":
                     res = _run_host_scan(body, root, kdir)
                 elif path == "/api/scan/demo":
-                    res = _run_demo_scan(root)
+                    res = _run_demo_scan(root, kdir)
                 elif path == "/api/ingest/host":
                     res = _run_ingest_host(body, root, kdir)
                 elif path == "/api/ingest/config":
@@ -2223,10 +2430,13 @@ function refreshViews(views) {
   const empty = document.getElementById('views-empty');
   count.textContent = String(views.length);
   if (empty) empty.hidden = views.length > 0;
-  list.innerHTML = views.map(v =>
-    '<li><a href="' + esc(v.url) + '"><strong>' + esc(v.name) + '</strong></a> ' +
-    '<span class="meta">' + esc(v.size_kb) + ' KB · updated ' + esc(v.updated) + '</span></li>'
-  ).join('');
+  list.innerHTML = views.map(v => {
+    let extra = '';
+    if (v.explore_url) extra += ' · <a href="' + esc(v.explore_url) + '">Explore in WebGL &rarr;</a>';
+    if (v.envelope_url) extra += ' · <a href="' + esc(v.envelope_url) + '" download>.envelope.json</a>';
+    return '<li><a href="' + esc(v.url) + '"><strong>' + esc(v.name) + '</strong></a> ' +
+      '<span class="meta">' + esc(v.size_kb) + ' KB · updated ' + esc(v.updated) + extra + '</span></li>';
+  }).join('');
 }
 async function readFileText(input) {
   if (!input.files || !input.files.length) return null;
