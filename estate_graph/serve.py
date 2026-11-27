@@ -175,6 +175,7 @@ def render_index(
         f'<h2>Available Witness Pages (<span id="views-count">{len(views)}</span>)</h2>'
         f"{views_html}"
         '<div class="quick-actions">'
+        '<a class="btn-primary" href="/explorer">Open Interactive WebGL Explorer</a>'
         '<button type="button" class="btn-secondary" id="btn-demo">Run Demo Estate Scan</button>'
         '<button type="button" class="btn-secondary" id="btn-host">Run Container Host Scan</button>'
         "</div>"
@@ -1179,6 +1180,171 @@ def _run_ingest_once(views_dir: Path, keys_dir: Path, cfg_path: Path) -> dict:
     }
 
 
+def _explorer_demo_bundle(keys_dir: Path) -> dict:
+    """Build two successive signed demo envelopes (baseline + 1 planted change)."""
+    from .cli import DEMO_DIR, build_graph
+    from .model import Edge, Evidence, LAYER_NETWORK, ServiceNode
+
+    priv_path, pub_path = _ensure_keys(keys_dir)
+    priv = load_private_key(priv_path)
+    pub = load_public_key(pub_path)
+    now = int(time.time())
+
+    graph_a, declared = build_graph(
+        DEMO_DIR / "declared_model.json",
+        [DEMO_DIR / "vpc_flow_logs.txt"],
+        [DEMO_DIR / "hubble.jsonl"],
+        [DEMO_DIR / "lineage.json"],
+        issued_at=now - 600,
+    )
+    graph_a.sequence = 1
+    env_a = sign_graph(graph_a, priv, ttl_seconds=86400)
+
+    graph_b, _ = build_graph(
+        DEMO_DIR / "declared_model.json",
+        [DEMO_DIR / "vpc_flow_logs.txt"],
+        [DEMO_DIR / "hubble.jsonl"],
+        [DEMO_DIR / "lineage.json"],
+        issued_at=now,
+    )
+    graph_b.sequence = 2
+    graph_b.nodes.append(
+        ServiceNode(
+            id="fraud-scorer",
+            kind="service",
+            substrate="kubernetes",
+            labels={"namespace": "payments", "tier": "risk"},
+        )
+    )
+    graph_b.edges.append(
+        Edge(
+            source="checkout-api",
+            target="fraud-scorer",
+            port=443,
+            protocol="tcp",
+            layer=LAYER_NETWORK,
+            evidence=Evidence(
+                flow_count=14,
+                first_seen=now - 120,
+                last_seen=now,
+                sources=["hubble"],
+            ),
+        )
+    )
+    env_b = sign_graph(graph_b, priv, ttl_seconds=86400)
+    return {
+        "env_a": env_a,
+        "env_b": env_b,
+        "pub": pub,
+        "declared": declared,
+        "now": now,
+    }
+
+
+def _resolve_explorer_pubkey(body: dict, keys_dir: Path):
+    pub_pem = body.get("pub_pem")
+    if pub_pem:
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+        key = serialization.load_pem_public_key(str(pub_pem).encode("utf-8"))
+        if not isinstance(key, Ed25519PublicKey):
+            raise ValueError("supplied public key is not an Ed25519 key")
+        return key
+    _priv, pub_path = _ensure_keys(keys_dir)
+    return load_public_key(pub_path)
+
+
+def _run_explorer_query(path: str, body: dict, keys_dir: Path) -> dict:
+    from .explorer import (
+        build_diff_view,
+        build_ego_view,
+        build_findings_view,
+        build_zoom_view,
+        load_verified_or_expired,
+        search_nodes,
+    )
+
+    use_demo = bool(body.get("use_demo")) or (
+        "envelope" not in body and "envelope_a" not in body
+    )
+    demo = _explorer_demo_bundle(keys_dir) if use_demo else None
+    pub = demo["pub"] if demo else _resolve_explorer_pubkey(body, keys_dir)
+    now = body.get("now")
+    if now is not None:
+        now = int(now)
+    elif demo:
+        now = demo["now"]
+
+    flt = {
+        "layers": body.get("layers"),
+        "min_time": body.get("min_time"),
+        "max_time": body.get("max_time"),
+        "min_flow_count": int(body.get("min_flow_count") or 0),
+    }
+
+    if path == "/api/explorer/diff":
+        env_a = body.get("envelope_a") if not use_demo else demo["env_a"]
+        env_b = body.get("envelope_b") if not use_demo else demo["env_b"]
+        if not isinstance(env_a, dict) or not isinstance(env_b, dict):
+            raise ValueError("envelope_a and envelope_b JSON objects are required")
+        result = build_diff_view(env_a, env_b, pub, now=now, **flt)
+        return {"ok": True, "result": result}
+
+    env = body.get("envelope") if not use_demo else demo["env_b"]
+    if not isinstance(env, dict):
+        raise ValueError("envelope JSON object is required")
+    graph, proof = load_verified_or_expired(env, pub, now=now)
+
+    if path == "/api/explorer/search":
+        matches = search_nodes(
+            graph,
+            str(body.get("query") or ""),
+            limit=int(body.get("limit") or 50),
+        )
+        return {"ok": True, "proof": proof, "matches": matches}
+
+    if path == "/api/explorer/ego":
+        center = str(body.get("center_node") or "").strip()
+        if not center and graph.nodes:
+            center = graph.nodes[0].id
+        rings = int(body.get("rings") or 1)
+        result = build_ego_view(graph, proof, center, rings=rings, **flt)
+        return {"ok": True, "result": result}
+
+    if path == "/api/explorer/findings":
+        if body.get("declared"):
+            raw_decl = body["declared"]
+            declared = parse_declared(
+                json.loads(raw_decl) if isinstance(raw_decl, str) else raw_decl
+            )
+        elif demo:
+            declared = demo["declared"]
+        else:
+            raise ValueError("declared model JSON is required for findings view")
+        selected_index = int(body.get("selected_index") or 0)
+        result = build_findings_view(
+            graph, proof, declared, selected_index=selected_index, **flt
+        )
+        return {"ok": True, "result": result}
+
+    if path == "/api/explorer/zoom":
+        level = str(body.get("level") or "estate")
+        parent_group = body.get("parent_group") or None
+        group_by = str(body.get("group_by") or "substrate")
+        result = build_zoom_view(
+            graph,
+            proof,
+            level=level,
+            parent_group=parent_group,
+            group_by=group_by,
+            **flt,
+        )
+        return {"ok": True, "result": result}
+
+    raise ValueError(f"unknown explorer route: {path}")
+
+
 def _resolve_require_auth(require_auth: bool | None) -> bool:
     if require_auth is not None:
         return bool(require_auth)
@@ -1355,6 +1521,33 @@ def make_handler(
                     self._redirect(f"/login?next={quote(path)}")
                 return
 
+            if path == "/explorer":
+                from .explorer import render_explorer_html
+
+                self._send(
+                    HTTPStatus.OK,
+                    "text/html; charset=utf-8",
+                    render_explorer_html(api_base="/api/explorer").encode("utf-8"),
+                )
+                return
+            if path == "/api/explorer/demo":
+                from .explorer import load_verified_or_expired
+
+                demo = _explorer_demo_bundle(kdir)
+                _ga, pa = load_verified_or_expired(demo["env_a"], demo["pub"], now=demo["now"])
+                gb, pb = load_verified_or_expired(demo["env_b"], demo["pub"], now=demo["now"])
+                self._send_json(
+                    HTTPStatus.OK,
+                    {
+                        "ok": True,
+                        "default_center": "checkout-api",
+                        "envelope_id_a": pa["envelope_id"],
+                        "envelope_id_b": pb["envelope_id"],
+                        "nodes_count": len(gb.nodes),
+                        "edges_count": len(gb.edges),
+                    },
+                )
+                return
             if path == "/api/views":
                 self._send_json(HTTPStatus.OK, {"views": _views_metadata(root)})
                 return
@@ -1550,14 +1743,23 @@ def make_handler(
                             {"ok": False, "error": "AUTHENTICATION_REQUIRED: sign in at /login"},
                         )
                         return
-                    elif str(principal.get("role") or "").upper() == "AUDITOR":
+                    elif str(principal.get("role") or "").upper() == "AUDITOR" and not path.startswith("/api/explorer/"):
                         self._send_json(
                             HTTPStatus.FORBIDDEN,
                             {"ok": False, "error": "AUDITOR_READ_ONLY_ROLE: read-only auditors cannot run scans or rotate keys"},
                         )
                         return
 
-                if path == "/api/scan/estate":
+                if path.startswith("/api/explorer/"):
+                    try:
+                        res = _run_explorer_query(path, body, kdir)
+                    except (VerificationError, KeyError, ValueError) as exc:
+                        self._send_json(
+                            HTTPStatus.BAD_REQUEST,
+                            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
+                        )
+                        return
+                elif path == "/api/scan/estate":
                     res = _run_estate_scan(body, root, kdir)
                 elif path == "/api/scan/host":
                     res = _run_host_scan(body, root, kdir)

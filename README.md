@@ -89,9 +89,22 @@ Every containment and shielding system lives or dies on one question: *what does
 
 ---
 
+## Interactive WebGL Explorer (`/explorer` & `g1-manifest explore`)
+
+For large estates (10,000+ nodes), G1-Manifest provides a separate interactive WebGL Explorer (`estate_graph/explorer.py`, served at `/explorer` and emitted offline via `g1-manifest explore`) without modifying the static witness-page renderer (`estate_graph/render.py`):
+
+1. **Diff View** — compares two verified DSSEv1 Ed25519 envelopes and draws only the delta (added/removed nodes & edges, changed evidence), displaying both envelope IDs and refusing tampered envelopes outright.
+2. **Ego View** — searches a node by name, displays immediate neighbors, expands one ring at a time, labels upstream vs. downstream direction, and shows blast-radius counts by ring.
+3. **Findings-First View** — starts from reconciliation findings (`observed_undeclared` / `declared_unobserved`) and renders only the focused subgraph around the selected finding with evidence pinned beside it.
+4. **Zoom Levels** — rolls up the estate hierarchically (`estate → segment → service → instance`) weighted by flow count with expand/collapse navigation, plus layer, time-window, and minimum flow-count filters.
+
+Every view carries its canonical `envelope_id` and proof state (`VERIFIED` or `EXPIRED`). Empirical acceptance runs (including a 10,000-node / 20,001-edge synthetic estate) are recorded in [docs/EXPLORER-RUNS.md](docs/EXPLORER-RUNS.md).
+
+---
+
 ## Repository Layout
 
-- `estate_graph/` — Core Python package (`model.py`, `aggregate.py`, `reconcile.py`, `host_reconcile.py`, `sign.py`, `verify.py`, `render.py`, `serve.py`, `cli.py`, `sources/`, `assets/`)
+- `estate_graph/` — Core Python package (`model.py`, `aggregate.py`, `reconcile.py`, `host_reconcile.py`, `sign.py`, `verify.py`, `render.py`, `explorer.py`, `serve.py`, `cli.py`, `sources/`, `ingestors/`, `destinations/`, `assets/`)
 - `schemas/` — JSON Schemas (Draft 2020-12) for `DependencyGraph` and DSSEv1 envelopes + `CHANGELOG.md`
 - `conformance/` — Consumer Conformance Test Suite (`test_conformance.py`)
 - `tests/` — Deterministic unit, integration, rendering, host-scanning, and hardening test suites

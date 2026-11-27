@@ -506,6 +506,59 @@ def cmd_export(args) -> int:
     return 0 if res["ok"] else 1
 
 
+def cmd_explore(args) -> int:
+    from .explorer import (
+        build_diff_view,
+        build_ego_view,
+        build_findings_view,
+        build_zoom_view,
+        load_verified_or_expired,
+        render_explorer_html,
+    )
+
+    envelope_a = json.loads(Path(args.envelope).read_text(encoding="utf-8"))
+    pub = load_public_key(args.pub)
+    now = args.now if args.now is not None else int(time.time())
+    try:
+        graph_a, proof_a = load_verified_or_expired(envelope_a, pub, now=now)
+    except VerificationError as exc:
+        print(f"REFUSED: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+
+    initial: dict = {}
+    active_graph = graph_a
+    active_proof = proof_a
+    if args.envelope_b:
+        envelope_b = json.loads(Path(args.envelope_b).read_text(encoding="utf-8"))
+        try:
+            initial["diff"] = build_diff_view(envelope_a, envelope_b, pub, now=now)
+            active_graph, active_proof = load_verified_or_expired(
+                envelope_b, pub, now=now
+            )
+        except VerificationError as exc:
+            print(f"REFUSED: {type(exc).__name__}: {exc}", file=sys.stderr)
+            return 1
+
+    center = args.center or (active_graph.nodes[0].id if active_graph.nodes else "")
+    if center:
+        initial["ego"] = build_ego_view(
+            active_graph, active_proof, center, rings=args.rings
+        )
+    if args.declared:
+        declared = load_declared(args.declared)
+        initial["findings"] = build_findings_view(active_graph, active_proof, declared)
+    initial["zoom"] = build_zoom_view(active_graph, active_proof, level="estate")
+
+    html_text = render_explorer_html(initial_data=initial, api_base="")
+    out_path = Path(args.out)
+    out_path.write_text(html_text, encoding="utf-8")
+    print(
+        f"explorer rendered ({active_proof['status'].upper()}, "
+        f"envelope={active_proof['envelope_id']}) -> {out_path}"
+    )
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="g1-manifest")
     parser.add_argument(
@@ -610,6 +663,26 @@ def main(argv=None) -> int:
     p.add_argument("--declared", help="optional declared model JSON for findings")
     p.add_argument("--state", help="optional delta state JSON path")
     p.set_defaults(func=cmd_export)
+
+    p = sub.add_parser(
+        "explore",
+        help="build a standalone interactive WebGL Explorer HTML from verified signed envelope(s)",
+    )
+    p.add_argument("--envelope", required=True, help="primary DSSE envelope JSON")
+    p.add_argument("--pub", required=True, help="Ed25519 public key PEM")
+    p.add_argument(
+        "--envelope-b",
+        help="optional second DSSE envelope JSON to populate Diff View",
+    )
+    p.add_argument(
+        "--declared",
+        help="optional declared model JSON to populate Findings-First View",
+    )
+    p.add_argument("--center", help="initial node ID for Ego View")
+    p.add_argument("--rings", type=int, default=1, help="initial ego ring depth")
+    p.add_argument("--now", type=int, default=None, help="override verification epoch")
+    p.add_argument("--out", required=True, help="output HTML file path")
+    p.set_defaults(func=cmd_explore)
 
     args = parser.parse_args(argv)
     if args.check_mode:
