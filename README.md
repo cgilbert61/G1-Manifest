@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/g1_logo.jpg" alt="G1 Logo" width="110" />
+  <img src="docs/assets/g1_logo.jpg" alt="G1-Manifest Logo" width="115" />
 </p>
 
 # G1-Manifest — by G1163RT Security Labs
@@ -8,30 +8,70 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-informational.svg)](pyproject.toml)
 [![Schema](https://img.shields.io/badge/DSSEv1-Ed25519%20v1.0-blue.svg)](schemas/dsse-envelope.v1.0.schema.json)
-[![Latency](https://img.shields.io/badge/verify%20p99-%3C%205.0%20ms-success.svg)](docs/benchmarks-sizing.md)
+[![Trivy](https://img.shields.io/badge/Trivy%20Alpine%203.24-0%20HIGH%20%2F%200%20CRITICAL-brightgreen.svg)](reports/devsecops_scan_report.md)
+[![Checkov](https://img.shields.io/badge/Checkov%20IaC-188%2F188%20PASS-brightgreen.svg)](reports/devsecops_scan_report.md)
+[![Semgrep](https://img.shields.io/badge/Semgrep%20SAST-0%20Findings-brightgreen.svg)](reports/devsecops_scan_report.md)
+[![Gitleaks](https://img.shields.io/badge/Gitleaks-0%20Leaks-brightgreen.svg)](reports/devsecops_scan_report.md)
 [![GovReady-Q](https://img.shields.io/badge/NIST%20SP%20800--53-Assessed-success.svg)](docs/govready_compliance_assessment_report.md)
-[![Federal DevSecOps](https://img.shields.io/badge/Federal%20DevSecOps-Verified-success.svg)](reports/devsecops_scan_report.md)
 [![Community Profile](https://img.shields.io/badge/community%20standards-100%25%20green-success.svg)](CONTRIBUTING.md)
 
-**Learned, signed, expiring dependency graphs for an estate — evidence over declaration (`v0.1.0`) — G1163RT Security Labs.**
+**Learned, signed, expiring dependency graphs for cloud estates and workstations — evidence over declaration (`v0.1.0`) — G1163RT Security Labs, Inc.**
 
-Every containment and shielding system lives or dies on one question: *what does this service actually depend on?* Lists written by people rot — the forgotten 2 a.m. license server or partner endpoint gets cut as faithfully as an attacker's callback during an incident. **G1-Manifest** is a standalone evidence-driven dependency graph producer and verifier that composes with **G1-Docket** and **G1-Warrant** strictly through signed, expiring artifacts:
+> **Core Operational Principle:** **Observation proposes, a human signature disposes — expired means expired.**
+
+---
+
+## What Is G1-Manifest & What Problem Does It Solve?
+
+Every containment and shielding system lives or dies on one question: *what does this service actually depend on?* Lists written by people rot — the forgotten 2 a.m. license server or partner endpoint gets cut as faithfully as an attacker's callback during an incident. **G1-Manifest** is a standalone evidence-driven dependency graph producer, reconciler, and fail-closed DSSEv1 verifier that composes with **G1-Docket** and **G1-Warrant** strictly through signed, expiring artifacts:
+
+| Dimension | Manual Allowlists (`AllowedEgressServices`) | G1-Manifest (`evidence over declaration`) |
+| :--- | :--- | :--- |
+| **Source of Truth** | Human-maintained lists that silently rot | Empirical flow & module evidence (`flow_count`, `first_seen`, `last_seen`, `sources`) |
+| **Rare Dependencies** | Forgotten until a 2 a.m. production outage | Preserved and flagged `low_frequency`, never averaged away |
+| **Unknown Traffic / DLLs** | Blindly blocked or silently missed | Named `observed_undeclared` findings (`HIGH` for external IPs & user-writable DLLs); nothing auto-promotes |
+| **Enforcement Trust** | Implicit trust in static config files | DSSEv1 Ed25519 signed & expiring envelopes; consumers fail closed via `arming_gate()` |
+| **Audit & Inspection** | Database-locked dashboards | Deterministic, offline-safe HTML witness pages with static evidence tables & verification badges |
+
+### Core Subsystems
 
 1. **Telemetry Observation (`estate_graph/sources/`)** — Read-only ingest of AWS VPC Flow Logs, Cilium Hubble JSONL, Warrant-shaped declared estate models, OpenLineage derivations, Windows Uninstall Registry, `pip` metadata, and live loaded process modules.
 2. **Deterministic Aggregation (`estate_graph/aggregate.py`)** — Merges observations into a canonical dependency graph where every edge carries empirical evidence (`flow_count`, `first_seen`, `last_seen`, `sources`). Rare flows are kept and flagged `low_frequency`, never averaged away.
 3. **Reconciliation (`estate_graph/reconcile.py`, `host_reconcile.py`)** — Diffs observed evidence against declared claims into three buckets (`confirmed`, `observed_undeclared`, `declared_unobserved`). Nothing observed ever auto-promotes: observation proposes, a human signature disposes.
 4. **DSSEv1 Ed25519 Signing & Fail-Closed Verification (`estate_graph/sign.py`, `verify.py`)** — Emits expiring DSSE envelopes (`application/vnd.g1163rt.estate-graph+json`, default TTL 24h). Consumers fail closed on bad signatures, unsupported schema versions, or expiry, and gate surgical shields via `arming_gate()`.
-5. **Offline Witness Renderer & Workstation Dashboard (`estate_graph/render.py`, `serve.py`)** — Renders deterministic, offline-safe HTML witness pages with static evidence tables and layered SVG graphs, plus a lightweight HTTP viewer with 1-click Windows (`.cmd`) and macOS (`.command`) workstation scanners.
+5. **Zero-Trust MFA Portal, Offline Witness Renderer & 1-Click Workstation Scanners (`estate_graph/auth.py`, `render.py`, `serve.py`)** — PBKDF2-HMAC-SHA256 + 6-digit TOTP & Push MFA login portal with RBAC, deterministic offline-safe HTML witness pages, and 1-click Windows (`.cmd`) / macOS (`.command`) workstation scanners.
 
 ---
 
 ## Visual Demonstration & Console Walkthrough
 
-### 1. G1-Manifest Dashboard & 1-Click Workstation Scanners (`:8088`)
-> Upload telemetry files to run estate scans, verify/render existing graphs or DSSE envelopes, manage Ed25519 signing keys, or download 1-click Windows/macOS workstation scanners that automatically ingest and open signed witness graphs in the browser.
+### 1. Zero-Trust MFA Login Portal (`:8088/login`)
+> Every operator session is authenticated via PBKDF2-HMAC-SHA256 (`100,000` iterations) + 6-digit TOTP or 2-digit number-match Push MFA (Cisco Duo / Okta FastPass), with strict RBAC (`AUTHORIZING_OFFICIAL`, `SERVICE_OWNER`, `OPERATOR`, and read-only `AUDITOR`).
 
-### 2. Standalone HTML Witness Page (`/demo_view.html`)
-> Every witness page displays its cryptographic proof state on its face (**VERIFIED**, **EXPIRED**, or **UNSIGNED**), highlights undeclared findings in red, renders deterministic left-to-right layered SVG topology, and embeds full static evidence tables that require no JavaScript.
+<p align="center">
+  <img src="docs/assets/screenshots/01-mfa-login-portal.png" alt="G1-Manifest Zero-Trust MFA Login Portal" width="100%" />
+</p>
+
+### 2. Witness Dashboard, Estate Scanner & 1-Click Workstation Scanners (`:8088/`)
+> Upload telemetry files (`declared_model.json`, AWS VPC Flow Logs, Cilium Hubble JSONL, OpenLineage JSON) to run signed estate scans, verify/render existing graphs or DSSE envelopes, rotate Ed25519 keys, or download 1-click Windows (`.cmd`) and macOS (`.command`) workstation scanners with scoped ingest tokens.
+
+<p align="center">
+  <img src="docs/assets/screenshots/02-manifest-dashboard.png" alt="G1-Manifest Authenticated Witness Dashboard" width="100%" />
+</p>
+
+### 3. Standalone Signed & Verified HTML Witness Page (`/demo_view.html`)
+> Every witness page displays its cryptographic proof state on its face (**VERIFIED**, **EXPIRED**, or **UNSIGNED**), renders deterministic left-to-right layered SVG topology, highlights undeclared flows (like the 2 a.m. `203.0.113.66` license server) in red, and shows live click-to-inspect evidence in the Details panel.
+
+<p align="center">
+  <img src="docs/assets/screenshots/03-demo-witness-graph.png" alt="G1-Manifest Verified Dependency Graph Witness Page" width="100%" />
+</p>
+
+### 4. Static Edge Evidence Table & Node Summary (Zero-JavaScript Testimony)
+> A witness must not require JavaScript to testify: every edge's flow count, first/last seen UTC timestamps, reconciliation status, and observation sources are server-rendered directly into the standalone HTML document so it works offline by double-clicking.
+
+<p align="center">
+  <img src="docs/assets/screenshots/04-witness-evidence-table.png" alt="G1-Manifest Static Edge Evidence Table and Node Summary" width="100%" />
+</p>
 
 ---
 
