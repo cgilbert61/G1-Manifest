@@ -2460,7 +2460,7 @@ document.getElementById('btn-ing-run').addEventListener('click', async () => {
 });
 
 document.getElementById('btn-ing-download').addEventListener('click', () => {
-  const blob = new Blob([JSON.stringify(buildIngestPayload(), null, 2) + '\n'], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify(buildIngestPayload(), null, 2) + '\\n'], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'ingest.json';
