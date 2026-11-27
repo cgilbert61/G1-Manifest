@@ -26,14 +26,18 @@ def parse_cisco_catalyst_inventory(
 ) -> tuple[dict[str, str], list[ServiceNode]]:
     """Parse Catalyst Center ``network-device`` JSON -> (ip_map, ServiceNodes)."""
     if isinstance(data, str):
-        parsed = json.loads(data)
+        try:
+            parsed = json.loads(data)
+        except json.JSONDecodeError:
+            return {}, []
     else:
         parsed = data
-    devices = (
+    raw_devices = (
         parsed.get("response", [])
         if isinstance(parsed, dict)
         else (parsed if isinstance(parsed, list) else [])
     )
+    devices = raw_devices if isinstance(raw_devices, list) else []
     ip_map: dict[str, str] = {}
     nodes: dict[str, ServiceNode] = {}
     for dev in devices:
@@ -77,11 +81,12 @@ def parse_cisco_sna_flows(
     else:
         parsed = data
 
-    flows = (
+    raw_flows = (
         parsed.get("data", {}).get("flows", [])
         if isinstance(parsed, dict) and isinstance(parsed.get("data"), dict)
         else (parsed.get("flows", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else []))
     )
+    flows = raw_flows if isinstance(raw_flows, list) else []
     agg: dict[tuple, FlowObservation] = {}
     for rec in flows:
         if stats:
@@ -95,8 +100,8 @@ def parse_cisco_sna_flows(
             if stats:
                 stats.record_drop("denied_flow")
             continue
-        subj = rec.get("subject") or {}
-        peer = rec.get("peer") or {}
+        subj = rec.get("subject") if isinstance(rec.get("subject"), dict) else {}
+        peer = rec.get("peer") if isinstance(rec.get("peer"), dict) else {}
         src_ip = str(subj.get("ipAddress") or rec.get("src_ip") or "").strip()
         dst_ip = str(peer.get("ipAddress") or rec.get("dst_ip") or "").strip()
         if not src_ip or not dst_ip:
@@ -131,7 +136,7 @@ def parse_cisco_sna_flows(
             raw_proto = peer.get("protocol", rec.get("protocol"))
             proto = str(raw_proto).upper() if raw_proto else None
 
-        st = rec.get("statistics") or {}
+        st = rec.get("statistics") if isinstance(rec.get("statistics"), dict) else {}
         try:
             first_ts = parse_ts(st.get("firstActiveTime") or rec.get("first_seen") or 0)
             last_ts = parse_ts(st.get("lastActiveTime") or rec.get("last_seen") or first_ts)

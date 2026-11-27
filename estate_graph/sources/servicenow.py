@@ -29,24 +29,35 @@ def parse_servicenow_cmdb(
 ) -> DeclaredModel:
     """Convert ServiceNow Table API ``cmdb_ci`` + ``cmdb_rel_ci`` JSON into DeclaredModel."""
     if isinstance(cis_data, str):
-        cis_obj = json.loads(cis_data)
+        try:
+            cis_obj = json.loads(cis_data)
+        except json.JSONDecodeError:
+            return DeclaredModel()
     else:
         cis_obj = cis_data
-    cis = (
+    raw_cis = (
         cis_obj.get("result", [])
         if isinstance(cis_obj, dict)
         else (cis_obj if isinstance(cis_obj, list) else [])
     )
+    cis = raw_cis if isinstance(raw_cis, list) else []
 
     if rels_data is None:
         rels = []
     else:
-        rels_obj = json.loads(rels_data) if isinstance(rels_data, str) else rels_data
-        rels = (
+        if isinstance(rels_data, str):
+            try:
+                rels_obj = json.loads(rels_data)
+            except json.JSONDecodeError:
+                rels_obj = []
+        else:
+            rels_obj = rels_data
+        raw_rels = (
             rels_obj.get("result", [])
             if isinstance(rels_obj, dict)
             else (rels_obj if isinstance(rels_obj, list) else [])
         )
+        rels = raw_rels if isinstance(raw_rels, list) else []
 
     model = DeclaredModel()
     sys_id_to_name: dict[str, str] = {}

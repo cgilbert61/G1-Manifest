@@ -39,20 +39,36 @@ def parse_azure_nsg_flow_logs(
     else:
         parsed = data
 
-    records = (
+    raw_records = (
         parsed.get("records", [])
         if isinstance(parsed, dict)
         else (parsed if isinstance(parsed, list) else [])
     )
+    records = raw_records if isinstance(raw_records, list) else []
     agg: dict[tuple, FlowObservation] = {}
 
     for rec in records:
         if not isinstance(rec, dict):
             continue
-        props = rec.get("properties") or {}
-        for rule_group in props.get("flows") or []:
-            for flow_group in rule_group.get("flows") or []:
-                for raw_tuple in flow_group.get("flowTuples") or []:
+        props = rec.get("properties")
+        if not isinstance(props, dict):
+            continue
+        rule_groups = props.get("flows")
+        if not isinstance(rule_groups, list):
+            continue
+        for rule_group in rule_groups:
+            if not isinstance(rule_group, dict):
+                continue
+            flow_groups = rule_group.get("flows")
+            if not isinstance(flow_groups, list):
+                continue
+            for flow_group in flow_groups:
+                if not isinstance(flow_group, dict):
+                    continue
+                tuples = flow_group.get("flowTuples")
+                if not isinstance(tuples, list):
+                    continue
+                for raw_tuple in tuples:
                     if stats:
                         stats.records_in += 1
                     parts = str(raw_tuple).split(",")
@@ -148,8 +164,18 @@ def parse_gcp_vpc_flow_logs(
             if stats:
                 stats.record_drop("non_dict_entry")
             continue
-        payload = entry.get("jsonPayload") or entry
-        conn = payload.get("connection") or {}
+        payload = entry.get("jsonPayload")
+        if payload is None:
+            payload = entry
+        if not isinstance(payload, dict):
+            if stats:
+                stats.record_drop("malformed_payload")
+            continue
+        conn = payload.get("connection")
+        if not isinstance(conn, dict):
+            if stats:
+                stats.record_drop("missing_connection")
+            continue
         src_ip = str(conn.get("src_ip") or "").strip()
         dst_ip = str(conn.get("dest_ip") or "").strip()
         if not src_ip or not dst_ip:
