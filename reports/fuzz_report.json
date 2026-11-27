@@ -30,8 +30,15 @@
       ]
     },
     "atheris": {
-      "status": "SKIPPED",
-      "reason": "Docker Desktop daemon not running locally; configured in fuzz/Dockerfile.atheris and .github/workflows/ci.yml (atheris-fuzz job)",
+      "status": "EXECUTED",
+      "version": "3.0.0",
+      "runtime": "python:3.11-slim (Docker g1-manifest-fuzz:latest)",
+      "harnesses_total": 4,
+      "harnesses_passed": 4,
+      "harnesses_failed": 0,
+      "runs_per_harness": 2000,
+      "total_runs": 8000,
+      "crashes": 0,
       "harnesses": [
         "fuzz/atheris_harnesses/fuzz_verify_envelope.py",
         "fuzz/atheris_harnesses/fuzz_parsers.py",

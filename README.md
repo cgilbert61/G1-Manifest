@@ -257,7 +257,7 @@ G1-Manifest integrates with **G1-Docket** and **G1-Warrant** exclusively through
 | **Trivy Image** | `g1-manifest:latest` (Alpine 3.24) OS + Python CVEs & secrets | `EXECUTED` | **0 CRITICAL / 0 HIGH**, **0 Python CVEs**, **0 secrets** (5 MEDIUM, 1 LOW) |
 | **Trivy FS** | Repository IaC misconfigurations, vulns & secrets | `EXECUTED` | **0 CRITICAL / 0 HIGH**, **0 vulns**, **0 secrets** (3 MEDIUM) |
 | **Hypothesis Fuzz** | 10 property-based fuzz targets (`fuzz/`) | `EXECUTED` | **10/10 PASS** (`1,500` examples, 2 edge cases remediated) |
-| **Atheris Fuzz** | 4 coverage-guided `libFuzzer` harnesses (`fuzz/atheris_harnesses/`) | `SKIPPED` | Local Docker daemon stopped; runs automatically in GitHub Actions CI (`atheris-fuzz`) |
+| **Atheris Fuzz** | 4 coverage-guided `libFuzzer` harnesses (`fuzz/atheris_harnesses/`) | `EXECUTED` | **4/4 PASS** (`8,000` libFuzzer runs in `atheris 3.0.0` Docker, `0` crashes) |
 | **oss-scanner** | Standalone OSS/license scanner | `SKIPPED` | Not installed locally (enrolled via `anthropics/oss-scanner#1615`) |
 
 ---

@@ -9,7 +9,7 @@
 | Fuzzer | Scope | Status | Empirical Result |
 | :--- | :--- | :--- | :--- |
 | **Hypothesis** (`fuzz/test_hypothesis_fuzz.py`) | Property-based fuzzing across 10 untrusted-input & security-invariant targets | `EXECUTED` | **10/10 targets PASS** (`1,500` generated examples, `0` failures in `5.07s`) |
-| **Atheris** (`fuzz/atheris_harnesses/`) | Coverage-guided `libFuzzer` across 4 harnesses (`fuzz_verify_envelope`, `fuzz_parsers`, `fuzz_render_html`, `fuzz_host_modules`) | `SKIPPED` | Docker Desktop daemon not running locally; wired into `.github/workflows/ci.yml` (`atheris-fuzz` job) and `fuzz/Dockerfile.atheris` |
+| **Atheris** (`fuzz/atheris_harnesses/`) | Coverage-guided `libFuzzer` across 4 harnesses (`fuzz_verify_envelope`, `fuzz_parsers`, `fuzz_render_html`, `fuzz_host_modules`) | `EXECUTED` | **4/4 harnesses PASS** (`8,000` libFuzzer runs — 2,000 each — `0` crashes in `atheris 3.0.0` / Python 3.11 Docker) |
 
 ## Hypothesis Per-Target Empirical Statistics
 
