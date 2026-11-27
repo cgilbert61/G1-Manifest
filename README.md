@@ -246,6 +246,22 @@ G1-Manifest integrates with **G1-Docket** and **G1-Warrant** exclusively through
 
 - **Health Probe:** `GET /health` (`200 OK` JSON) wired into `Dockerfile` `HEALTHCHECK` and `k8s/deployment.yaml` liveness/readiness probes.
 - **Empirical Verification Scorecard:** Run `python scripts/run_all_verifications.py` to execute unit/integration tests, consumer conformance, demo, compliance harness, and latency benchmarks into [`reports/verification_scorecard.json`](reports/verification_scorecard.json).
+- **Scale Baseline:** See [`SCALE.md`](SCALE.md) (5,000-edge control and 50,000-edge scale measurements across `aggregate → reconcile → sign → verify → render`).
+- **Ingestor Contract & Run Receipts:** See [`docs/INGESTORS.md`](docs/INGESTORS.md) and [`docs/INGESTOR-RUNS.md`](docs/INGESTOR-RUNS.md).
+
+### Honest Source Status
+
+| Source | Status | Notes |
+| :--- | :--- | :--- |
+| **NetFlow v9 / IPFIX UDP** (`netflow-v9`, `ipfix`) | `live-tested` (loopback UDP) | Binary RFC 3954 / RFC 7011 decoder + live UDP listener verified in 2-cycle runner proof |
+| **sFlow v5 UDP** (`sflow`) | `live-tested` (loopback UDP) | Binary RFC 3176 decoder + live UDP listener; preserves `sampling_rate` on edge labels |
+| **OpenLineage HTTP** (`openlineage`) | `live-tested` (loopback HTTP) | `POST /api/v1/lineage` intake verified in 2-cycle runner proof; stays on `layer="lineage"` |
+| **Windows Registry & Loaded Modules** (`scan-host`) | `live-tested` (Windows 11 host) | Executed live on local Windows workstation + fixture-tested on Linux |
+| **AWS VPC Flow Logs (S3 / CloudWatch)** | `fixture-tested` | Checkpointed & deduplicated collectors; requires live AWS account for live-estate proof |
+| **Azure NSG Flow Logs v2 / GCP VPC Flow Logs** | `fixture-tested` | Pure parsers + checkpointed collectors; requires live cloud tenants for live-estate proof |
+| **Cilium Hubble Live Stream** | `fixture-tested` | Reuses `parse_hubble` identity logic + cursor checkpoint; requires live Hubble Relay for live-estate proof |
+| **Cisco Catalyst Center + SNA** | `fixture-tested` | Read-only REST adapter (NetFlow/IPFIX already covers Cisco hardware flows) |
+| **ServiceNow CMDB** (`servicenow-cmdb`) | `fixture-tested` | Read-only Table API -> `DeclaredModel` preserving `servicenow_sys_id`; no write-back |
 - **Fuzz Testing Report ([Full Report](reports/fuzz_report.md)):** Property-based fuzzing via **Hypothesis** (`fuzz/test_hypothesis_fuzz.py`: **10/10 targets PASS**, `1,500` generated examples, 2 edge cases caught & fixed) and coverage-guided `libFuzzer` harnesses via **Atheris** (`fuzz/atheris_harnesses/`, running in GitHub Actions CI & `fuzz/Dockerfile.atheris`).
 - **Latest Empirical DevSecOps Scan ([Full Report](reports/devsecops_scan_report.md)):**
 

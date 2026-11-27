@@ -463,6 +463,23 @@ def cmd_serve(args) -> int:
     return 0
 
 
+def cmd_ingest(args) -> int:
+    from .ingestors.runner import build_runner_from_config
+
+    runner, startables = build_runner_from_config(args.config)
+    for item in startables:
+        item.start()
+    try:
+        reports = runner.run(max_cycles=args.cycles)
+        print(json.dumps(reports[-1] if reports else {}, indent=2))
+    except KeyboardInterrupt:
+        pass
+    finally:
+        for item in startables:
+            item.stop()
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="g1-manifest")
     parser.add_argument(
@@ -543,6 +560,19 @@ def main(argv=None) -> int:
         help="disable the operator MFA login portal (unauthenticated LAN mode)",
     )
     p.set_defaults(func=cmd_serve)
+
+    p = sub.add_parser(
+        "ingest",
+        help="run configured live telemetry collectors and continuously re-issue signed envelopes",
+    )
+    p.add_argument("--config", required=True, help="path to ingestor JSON config file")
+    p.add_argument(
+        "--cycles",
+        type=int,
+        default=0,
+        help="number of cycles to run (0 = continuous)",
+    )
+    p.set_defaults(func=cmd_ingest)
 
     args = parser.parse_args(argv)
     if args.check_mode:

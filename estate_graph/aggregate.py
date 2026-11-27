@@ -34,6 +34,7 @@ def aggregate(
     issued_at: int | None = None,
     ttl_seconds: int = 86400,
     low_frequency_threshold: int = DEFAULT_LOW_FREQUENCY_THRESHOLD,
+    sequence: int = 1,
 ) -> DependencyGraph:
     issued = int(issued_at if issued_at is not None else time.time())
     nodes: dict[str, ServiceNode] = {}
@@ -68,6 +69,8 @@ def aggregate(
         key = (obs.source, obs.target, obs.port, obs.protocol, "network")
         if key in edges:
             edges[key].evidence = edges[key].evidence.merge(ev)
+            if obs.labels:
+                edges[key].labels.update(obs.labels)
         else:
             edges[key] = Edge(
                 source=obs.source,
@@ -76,6 +79,7 @@ def aggregate(
                 protocol=obs.protocol,
                 layer="network",
                 evidence=ev,
+                labels=dict(obs.labels) if obs.labels else {},
             )
     for edge in extra_edges or []:
         ensure_node(edge.source)
@@ -111,6 +115,7 @@ def aggregate(
         producer=producer,
         issued_at=issued,
         expires_at=issued + ttl_seconds,
+        sequence=sequence,
         nodes=sorted(nodes.values(), key=lambda n: n.id),
         edges=sorted(
             edges.values(),

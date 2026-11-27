@@ -171,6 +171,7 @@ class FlowObservation:
     first_seen: int
     last_seen: int
     origin: str  # which source produced it, e.g. "vpc-flow-logs"
+    labels: dict = field(default_factory=dict)  # e.g. {"sampling_rate": 1000}
 
 
 @dataclass
