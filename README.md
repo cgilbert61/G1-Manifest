@@ -73,6 +73,20 @@ Every containment and shielding system lives or dies on one question: *what does
   <img src="docs/assets/screenshots/04-witness-evidence-table.png" alt="G1-Manifest Static Edge Evidence Table and Node Summary" width="100%" />
 </p>
 
+### 5. Downstream Destinations Export Panel (All 13 Vendors & Audited Config)
+> Configure per-destination outbound exports across **CMDB / ITSM** (ServiceNow IRE/CSDM, BMC Helix, JSM Assets, Ivanti Neurons, Device42, Freshservice), **Network & Observability Maps** (Cisco Catalyst Center, Datadog, Dynatrace, SolarWinds NPM), and **Graph & Catalog** (Neo4j, Backstage, Generic REST/Webhook) — with credential references only (no raw secrets), `full` / `delta` / `findings_only` modes, fail-closed verification, and an audited configuration log.
+
+<p align="center">
+  <img src="docs/assets/screenshots/05-downstream-destinations.png" alt="G1-Manifest Downstream Destinations Dropdown and Export Configuration" width="100%" />
+</p>
+
+### 6. Live Telemetry Ingestion & 1-Click Workstation Scanners
+> Configure read-only live collectors directly in the UI (`NetFlow v9 / IPFIX`, `sFlow v5`, `OpenLineage HTTP`, `AWS S3 / CloudWatch`, `Azure NSG`, `GCP VPC`, `Cisco Catalyst / SNA`, and read-only `ServiceNow CMDB`), run on-demand cycles, or download 1-click Windows (`.cmd`) and macOS (`.command`) workstation scanners.
+
+<p align="center">
+  <img src="docs/assets/screenshots/06-live-telemetry-ingestion.png" alt="G1-Manifest Live Telemetry Ingestion Dropdown and Workstation Scanners" width="100%" />
+</p>
+
 ---
 
 ## Repository Layout
