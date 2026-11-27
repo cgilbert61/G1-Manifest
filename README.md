@@ -262,6 +262,15 @@ G1-Manifest integrates with **G1-Docket** and **G1-Warrant** exclusively through
 | **Cilium Hubble Live Stream** | `fixture-tested` | Reuses `parse_hubble` identity logic + cursor checkpoint; requires live Hubble Relay for live-estate proof |
 | **Cisco Catalyst Center + SNA** | `fixture-tested` | Read-only REST adapter (NetFlow/IPFIX already covers Cisco hardware flows) |
 | **ServiceNow CMDB** (`servicenow-cmdb`) | `fixture-tested` | Read-only Table API -> `DeclaredModel` preserving `servicenow_sys_id`; no write-back |
+
+### Honest Downstream Destination Status ([Export Receipts](docs/EXPORT-RUNS.md))
+
+| Group | Destination | Status | Notes |
+| :--- | :--- | :--- | :--- |
+| **Graph & Catalog** | Generic REST / Webhook (`webhook`) | `live-tested` (loopback HTTP) | Configured via Manifest UI, exported verified graph, audited in `destination_audit.jsonl` |
+| **Graph & Catalog** | Neo4j (`neo4j`), Backstage (`backstage`) | `fixture-tested` | Parameterized Cypher HTTP & `backstage.io/v1alpha1` entities preserving `envelope_id` & `expires_at` |
+| **CMDB / ITSM** | ServiceNow IRE (`servicenow`), BMC Helix (`bmc-helix`), JSM Assets (`jsm-assets`), Ivanti (`ivanti-itsm`), Device42 (`device42`), Freshservice (`freshservice`) | `fixture-tested` | Vendor-documented REST/IRE payload formats; requires live sandbox tenant for `live-tested` |
+| **Network & Observability** | Cisco Catalyst (`cisco-catalyst`), Datadog (`datadog`), Dynatrace (`dynatrace`), SolarWinds NPM (`solarwinds-npm`) | `fixture-tested` | Vendor-documented topology/catalog/event APIs; requires live tenant for `live-tested` |
 - **Fuzz Testing Report ([Full Report](reports/fuzz_report.md)):** Property-based fuzzing via **Hypothesis** (`fuzz/test_hypothesis_fuzz.py`: **10/10 targets PASS**, `1,500` generated examples, 2 edge cases caught & fixed) and coverage-guided `libFuzzer` harnesses via **Atheris** (`fuzz/atheris_harnesses/`, running in GitHub Actions CI & `fuzz/Dockerfile.atheris`).
 - **Latest Empirical DevSecOps Scan ([Full Report](reports/devsecops_scan_report.md)):**
 

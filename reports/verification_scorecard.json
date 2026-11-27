@@ -1,6 +1,6 @@
 {
   "project": "G1-Manifest",
-  "generated_at": "2026-11-27T19:26:37Z",
+  "generated_at": "2026-11-27T22:52:11Z",
   "overall": "PASS",
   "executed_checks": {
     "unit_and_integration_tests": {
@@ -8,9 +8,9 @@
       "returncode": 0,
       "status": "PASS",
       "tail": [
-        "..................................................................s..... [ 94%]",
-        "....                                                                     [100%]",
-        "75 passed, 1 skipped in 9.84s"
+        "........................................................................ [ 76%]",
+        "............s.........                                                   [100%]",
+        "93 passed, 1 skipped in 12.46s"
       ]
     },
     "consumer_conformance": {
@@ -19,7 +19,7 @@
       "status": "PASS",
       "tail": [
         ".....                                                                    [100%]",
-        "5 passed in 0.24s"
+        "5 passed in 0.23s"
       ]
     },
     "end_to_end_demo": {
@@ -48,33 +48,33 @@
     "metrics": {
       "build_ms": {
         "samples": 25,
-        "p50_ms": 0.947,
-        "p95_ms": 1.155,
-        "p99_ms": 1.306
+        "p50_ms": 0.922,
+        "p95_ms": 1.164,
+        "p99_ms": 1.225
       },
       "reconcile_ms": {
         "samples": 25,
         "p50_ms": 0.024,
-        "p95_ms": 0.033,
-        "p99_ms": 0.035
+        "p95_ms": 0.036,
+        "p99_ms": 0.041
       },
       "sign_ms": {
         "samples": 25,
-        "p50_ms": 0.216,
-        "p95_ms": 0.252,
-        "p99_ms": 0.374
+        "p50_ms": 0.215,
+        "p95_ms": 0.249,
+        "p99_ms": 0.356
       },
       "verify_ms": {
         "samples": 25,
-        "p50_ms": 0.267,
-        "p95_ms": 0.306,
-        "p99_ms": 0.334
+        "p50_ms": 0.268,
+        "p95_ms": 0.301,
+        "p99_ms": 0.303
       },
       "render_ms": {
         "samples": 25,
-        "p50_ms": 0.706,
-        "p95_ms": 1.016,
-        "p99_ms": 1.543
+        "p50_ms": 0.699,
+        "p95_ms": 0.765,
+        "p99_ms": 1.632
       }
     }
   }

@@ -181,6 +181,69 @@ def render_index(
         '<div id="quick-status" class="status-box" hidden></div>'
         "</section>"
         '<section class="panel">'
+        "<h2>Downstream Destinations (Export Signed Graph)</h2>"
+        "<p class=\"hint\">Configure downstream systems to receive verified, unexpired "
+        "graphs or findings. Supply a <strong>credential reference</strong> (environment "
+        "variable name) only — this UI never takes, stores, or displays raw secrets. "
+        "Every configuration change is recorded in the audit log.</p>"
+        '<form id="form-dest" class="form">'
+        '<div class="row">'
+        '<label>Downstream System<select id="d-system">'
+        '<optgroup label="CMDB / ITSM">'
+        '<option value="servicenow">ServiceNow CMDB (IRE / CSDM)</option>'
+        '<option value="bmc-helix">BMC Helix CMDB</option>'
+        '<option value="jsm-assets">Jira Service Management Assets</option>'
+        '<option value="ivanti-itsm">Ivanti Neurons for ITSM</option>'
+        '<option value="device42">Device42</option>'
+        '<option value="freshservice">Freshservice</option>'
+        "</optgroup>"
+        '<optgroup label="Network &amp; Observability Maps">'
+        '<option value="cisco-catalyst">Cisco Catalyst Center</option>'
+        '<option value="datadog">Datadog</option>'
+        '<option value="dynatrace">Dynatrace</option>'
+        '<option value="solarwinds-npm">SolarWinds NPM</option>'
+        "</optgroup>"
+        '<optgroup label="Graph &amp; Catalog">'
+        '<option value="neo4j">Neo4j (Cypher)</option>'
+        '<option value="backstage">Backstage Service Catalog</option>'
+        '<option value="webhook" selected>Generic REST / Webhook</option>'
+        "</optgroup>"
+        "</select></label>"
+        '<label>Destination Name<input type="text" id="d-name" placeholder="prod-cmdb or webhook-sink" required></label>'
+        "</div>"
+        '<div class="row">'
+        '<label>Endpoint URL *<input type="text" id="d-endpoint" placeholder="https://destination.example/api" required></label>'
+        '<label>Credential Reference (Env Var Name Only)<input type="text" id="d-cred-ref" placeholder="e.g. SERVICENOW_TOKEN"></label>'
+        "</div>"
+        '<div class="row">'
+        '<label>What Gets Sent<select id="d-mode">'
+        '<option value="full">Full Graph + Evidence + Findings</option>'
+        '<option value="delta">Delta Since Last Successful Send</option>'
+        '<option value="findings_only">Reconciliation Findings Only</option>'
+        "</select></label>"
+        '<label>Schedule<select id="d-schedule">'
+        '<option value="manual">Manual</option>'
+        '<option value="hourly">Hourly</option>'
+        '<option value="every-6h">Every 6 Hours</option>'
+        '<option value="daily">Daily</option>'
+        "</select></label>"
+        "</div>"
+        '<div class="row">'
+        '<label>Where Data Shows Up in Destination<input type="text" id="d-target-view" placeholder="e.g. CMDB -> CSDM Services"></label>'
+        '<label class="check"><input type="checkbox" id="d-enabled" checked> Enabled (On)</label>'
+        "</div>"
+        '<div class="quick-actions">'
+        '<button type="submit" class="btn-primary">Save Destination</button>'
+        '<button type="button" class="btn-secondary" id="btn-dest-send">Send Verified Graph Now</button>'
+        "</div>"
+        "</form>"
+        '<div id="dest-status" class="status-box" hidden></div>'
+        '<h3 style="margin:14px 0 6px;font-size:13px;">Configured Destinations</h3>'
+        '<ul class="views" id="dest-list"></ul>'
+        '<h3 style="margin:14px 0 6px;font-size:13px;">Configuration Audit Log</h3>'
+        '<ul class="views" id="dest-audit"></ul>'
+        "</section>"
+        '<section class="panel">'
         "<h2>Render / Verify Existing Graph or Envelope</h2>"
         "<p class=\"hint\">Upload a raw <code>graph.json</code> (e.g. from Windows "
         "<code>scan-host</code>) or a signed DSSE <code>envelope.json</code> + "
@@ -1133,6 +1196,10 @@ def make_handler(
     root = views_dir.resolve()
     kdir = (keys_dir or (root.parent / "keys")).resolve()
     ingest_cfg_path = (root.parent / "ingest_config.json").resolve()
+    from .destinations import DestinationConfigStore, DestinationStateStore
+
+    dest_cfg_store = DestinationConfigStore(root.parent / "destinations.json")
+    dest_state_store = DestinationStateStore(root.parent / "destination_state.json")
     enforce_auth = _resolve_require_auth(require_auth)
     auth_mgr = auth_manager or ManifestAuthManager()
 
@@ -1299,6 +1366,25 @@ def make_handler(
                         "config": _load_ingest_config(ingest_cfg_path),
                         "env_status": _ingest_env_status(),
                     },
+                )
+                return
+            if path == "/api/destinations":
+                from .destinations import SUPPORTED_SYSTEMS
+
+                self._send_json(
+                    HTTPStatus.OK,
+                    {
+                        "ok": True,
+                        "destinations": dest_cfg_store.list_destinations(),
+                        "systems": SUPPORTED_SYSTEMS,
+                        "audit": dest_cfg_store.read_audit_log(20),
+                    },
+                )
+                return
+            if path == "/api/destinations/audit":
+                self._send_json(
+                    HTTPStatus.OK,
+                    {"ok": True, "audit": dest_cfg_store.read_audit_log(50)},
                 )
                 return
             if path == "/api/agent/windows.cmd":
@@ -1483,6 +1569,67 @@ def make_handler(
                     res = _save_ingest_config(body, ingest_cfg_path)
                 elif path == "/api/ingest/run-once":
                     res = _run_ingest_once(root, kdir, ingest_cfg_path)
+                elif path == "/api/destinations":
+                    actor = (
+                        str(principal.get("email"))
+                        if (enforce_auth and principal)
+                        else "operator"
+                    )
+                    saved, audit = dest_cfg_store.upsert(body, actor=actor)
+                    res = {
+                        "ok": True,
+                        "destination": saved,
+                        "audit_entry": audit,
+                        "destinations": dest_cfg_store.list_destinations(),
+                        "audit": dest_cfg_store.read_audit_log(20),
+                    }
+                elif path == "/api/destinations/delete":
+                    actor = (
+                        str(principal.get("email"))
+                        if (enforce_auth and principal)
+                        else "operator"
+                    )
+                    deleted = dest_cfg_store.delete(
+                        str(body.get("id") or ""), actor=actor
+                    )
+                    res = {
+                        "ok": deleted,
+                        "destinations": dest_cfg_store.list_destinations(),
+                        "audit": dest_cfg_store.read_audit_log(20),
+                    }
+                elif path == "/api/destinations/send":
+                    from .cli import DEMO_DIR, build_graph
+                    from .destinations import ExportEngine, create_adapter
+
+                    priv_path, pub_path = _ensure_keys(kdir)
+                    pub = load_public_key(pub_path)
+                    now = int(time.time())
+                    if isinstance(body.get("envelope"), dict):
+                        env = body["envelope"]
+                        declared = None
+                    else:
+                        graph, declared = build_graph(
+                            DEMO_DIR / "declared_model.json",
+                            [DEMO_DIR / "vpc_flow_logs.txt"],
+                            [DEMO_DIR / "hubble.jsonl"],
+                            [DEMO_DIR / "lineage.json"],
+                            issued_at=now,
+                        )
+                        env = sign_graph(
+                            graph, load_private_key(priv_path), ttl_seconds=86400
+                        )
+                    only_id = str(body.get("destination_id") or "").strip()
+                    dests = dest_cfg_store.list_destinations()
+                    if only_id:
+                        dests = [d for d in dests if d.get("id") == only_id]
+                    adapters = [create_adapter(d) for d in dests]
+                    engine = ExportEngine(state_store=dest_state_store)
+                    try:
+                        res = engine.export_envelope(
+                            env, pub, adapters, declared=declared, now=now
+                        )
+                    except VerificationError as exc:
+                        raise ValueError(f"EXPORT_REFUSED: {type(exc).__name__}: {exc}") from exc
                 elif path == "/api/render":
                     res = _run_render_artifact(body, root, kdir)
                 elif path == "/api/keys/rotate":
@@ -2116,6 +2263,84 @@ document.getElementById('btn-ing-download').addEventListener('click', () => {
   a.href = URL.createObjectURL(blob);
   a.download = 'ingest.json';
   a.click();
+});
+
+function renderDestinations(dests, audit) {
+  const ul = document.getElementById('dest-list');
+  if (ul) {
+    if (!dests || !dests.length) {
+      ul.innerHTML = '<li><span class="meta">No downstream destinations configured yet.</span></li>';
+    } else {
+      ul.innerHTML = dests.map(d =>
+        '<li><span><code>' + esc(d.system) + '</code> <strong>' + esc(d.name) + '</strong> · ' +
+        esc(d.send_mode) + ' · ' + esc(d.schedule) + ' · ' + (d.enabled ? 'ON' : 'OFF') +
+        (d.credential_ref ? ' · cred: <code>' + esc(d.credential_ref) + '</code>' : '') +
+        '</span><button type="button" class="btn-secondary" data-del-dest="' + esc(d.id) + '">Delete</button></li>'
+      ).join('');
+      ul.querySelectorAll('button[data-del-dest]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const res = await postJson('/api/destinations/delete', { id: btn.dataset.delDest });
+          renderDestinations(res.destinations, res.audit);
+        });
+      });
+    }
+  }
+  const aul = document.getElementById('dest-audit');
+  if (aul) {
+    if (!audit || !audit.length) {
+      aul.innerHTML = '<li><span class="meta">No configuration changes logged yet.</span></li>';
+    } else {
+      aul.innerHTML = audit.slice(0, 8).map(a =>
+        '<li><span><code>' + esc(a.action) + '</code> <strong>' + esc(a.destination_id) + '</strong> by ' +
+        esc(a.actor) + '</span><span class="meta">' + esc(a.timestamp) + '</span></li>'
+      ).join('');
+    }
+  }
+}
+(async () => {
+  try {
+    const resp = await fetch('/api/destinations');
+    if (resp.ok) {
+      const data = await resp.json();
+      renderDestinations(data.destinations, data.audit);
+    }
+  } catch (_) {}
+})();
+
+document.getElementById('form-dest').addEventListener('submit', async e => {
+  e.preventDefault();
+  const box = document.getElementById('dest-status');
+  try {
+    const res = await postJson('/api/destinations', {
+      name: document.getElementById('d-name').value,
+      system: document.getElementById('d-system').value,
+      endpoint: document.getElementById('d-endpoint').value,
+      credential_ref: document.getElementById('d-cred-ref').value,
+      send_mode: document.getElementById('d-mode').value,
+      schedule: document.getElementById('d-schedule').value,
+      target_view: document.getElementById('d-target-view').value,
+      enabled: document.getElementById('d-enabled').checked,
+    });
+    renderDestinations(res.destinations, res.audit);
+    showStatus(box, true, 'Saved destination <strong>' + esc(res.destination.name) + '</strong> (audited).');
+  } catch (err) {
+    showStatus(box, false, esc(err.message));
+  }
+});
+
+document.getElementById('btn-dest-send').addEventListener('click', async () => {
+  const box = document.getElementById('dest-status');
+  try {
+    const res = await postJson('/api/destinations/send', {});
+    const parts = (res.results || []).map(r =>
+      esc(r.destination_id) + ': ' + (r.ok ? 'accepted=' + r.accepted : 'FAILED (' + esc(r.error) + ')')
+    );
+    showStatus(box, Boolean(res.ok),
+      'Exported envelope <code>' + esc(res.envelope_id) + '</code> — ' +
+      (parts.join(' · ') || 'no enabled destinations'));
+  } catch (err) {
+    showStatus(box, false, esc(err.message));
+  }
 });
 
 setInterval(async () => {

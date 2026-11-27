@@ -480,6 +480,32 @@ def cmd_ingest(args) -> int:
     return 0
 
 
+def cmd_export(args) -> int:
+    from .destinations import (
+        DestinationConfigStore,
+        DestinationStateStore,
+        ExportEngine,
+        create_adapter,
+    )
+
+    envelope = json.loads(Path(args.envelope).read_text(encoding="utf-8"))
+    pub = load_public_key(args.pub)
+    declared = load_declared(args.declared) if args.declared else None
+    cfg_store = DestinationConfigStore(args.config)
+    state_store = DestinationStateStore(
+        args.state or (Path(args.config).parent / "destination_state.json")
+    )
+    adapters = [create_adapter(d) for d in cfg_store.list_destinations()]
+    engine = ExportEngine(state_store=state_store)
+    try:
+        res = engine.export_envelope(envelope, pub, adapters, declared=declared)
+    except VerificationError as exc:
+        print(f"REFUSED: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(res, indent=2))
+    return 0 if res["ok"] else 1
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="g1-manifest")
     parser.add_argument(
@@ -573,6 +599,17 @@ def main(argv=None) -> int:
         help="number of cycles to run (0 = continuous)",
     )
     p.set_defaults(func=cmd_ingest)
+
+    p = sub.add_parser(
+        "export",
+        help="verify a signed envelope fail-closed and export to configured downstream destinations",
+    )
+    p.add_argument("--envelope", required=True, help="DSSE envelope JSON")
+    p.add_argument("--pub", required=True, help="Ed25519 public key PEM")
+    p.add_argument("--config", required=True, help="destinations config JSON")
+    p.add_argument("--declared", help="optional declared model JSON for findings")
+    p.add_argument("--state", help="optional delta state JSON path")
+    p.set_defaults(func=cmd_export)
 
     args = parser.parse_args(argv)
     if args.check_mode:
