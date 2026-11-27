@@ -505,3 +505,61 @@ def test_live_continuous_runner_multi_source_end_to_end(tmp_path):
         nf_col.stop()
         sf_col.stop()
         ol_col.stop()
+
+
+def test_gui_ingest_config_and_run_once_endpoints(tmp_path):
+    import threading
+
+    from estate_graph.serve import serve_views
+
+    server = serve_views(
+        tmp_path / "views",
+        host="127.0.0.1",
+        port=0,
+        keys_dir=tmp_path / "keys",
+        require_auth=False,
+    )
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ingest/config") as resp:
+            cfg_res = json.loads(resp.read())
+            assert cfg_res["ok"] is True
+            assert "env_status" in cfg_res
+
+        save_req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/ingest/config",
+            data=json.dumps(
+                {
+                    "graph_id": "gui-estate",
+                    "ttl_seconds": 3600,
+                    "reissue_interval_seconds": 300,
+                    "sources": [
+                        {"id": "nf-1", "type": "netflow", "host": "127.0.0.1", "port": 0}
+                    ],
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(save_req) as resp:
+            saved = json.loads(resp.read())
+            assert saved["ok"] is True
+            assert len(saved["config"]["sources"]) == 1
+
+        run_req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/ingest/run-once",
+            data=b"{}",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(run_req) as resp:
+            run_res = json.loads(resp.read())
+            assert run_res["ok"] is True
+            assert run_res["view"] == "gui-estate_ingested_view.html"
+            assert run_res["report"]["sequence"] == 1
+    finally:
+        server.shutdown()
+        server.server_close()
+

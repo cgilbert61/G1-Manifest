@@ -227,6 +227,44 @@ def render_index(
         '<div id="estate-status" class="status-box" hidden></div>'
         "</section>"
         '<section class="panel">'
+        "<h2>Live Telemetry Ingestion</h2>"
+        "<p class=\"hint\">Configure read-only telemetry sources (NetFlow v9/IPFIX, sFlow, "
+        "OpenLineage HTTP, AWS/Azure/GCP flow exports, Cisco Catalyst/SNA, ServiceNow CMDB). "
+        "Credentials are read strictly from environment variables — never stored here.</p>"
+        '<form id="form-ingest-cfg" class="form">'
+        '<div class="row">'
+        '<label>Graph ID<input type="text" id="ing-graph-id" value="estate-graph"></label>'
+        '<label>ServiceNow CMDB URL (optional, read-only)<input type="text" id="ing-sn-url" placeholder="https://instance.service-now.com"></label>'
+        "</div>"
+        '<div class="row">'
+        '<label>TTL (seconds)<input type="number" id="ing-ttl" value="86400" min="120"></label>'
+        '<label>Re-issue Interval (sec, &lt; TTL)<input type="number" id="ing-interval" value="3600" min="60"></label>'
+        "</div>"
+        '<div class="row">'
+        '<label>Add Source Type<select id="ing-src-type">'
+        '<option value="netflow">NetFlow v9 / IPFIX (UDP)</option>'
+        '<option value="sflow">sFlow v5 (UDP)</option>'
+        '<option value="openlineage-http">OpenLineage HTTP Intake</option>'
+        '<option value="aws-s3">AWS VPC Flow Logs (S3)</option>'
+        '<option value="aws-cwlogs">AWS VPC Flow Logs (CloudWatch)</option>'
+        '<option value="azure-nsg">Azure NSG Flow Logs (Blob)</option>'
+        '<option value="gcp-vpc">GCP VPC Flow Logs (GCS)</option>'
+        '<option value="cisco">Cisco Catalyst / SNA (REST)</option>'
+        "</select></label>"
+        '<label>Endpoint / Bucket / Port<input type="text" id="ing-src-target" placeholder="0.0.0.0:2055 or bucket-name"></label>'
+        "</div>"
+        '<div class="quick-actions">'
+        '<button type="button" class="btn-secondary" id="btn-ing-add">+ Add Source</button>'
+        '<button type="submit" class="btn-primary">Save Ingestion Config</button>'
+        '<button type="button" class="btn-secondary" id="btn-ing-run">Run 1 Cycle Now</button>'
+        '<button type="button" class="btn-secondary" id="btn-ing-download">Download ingest.json</button>'
+        "</div>"
+        '<ul class="views" id="ing-sources-list" style="margin-top:8px;"></ul>'
+        '<div id="ing-env-status" class="hint" style="margin-top:8px;margin-bottom:0;"></div>'
+        "</form>"
+        '<div id="ingest-status" class="status-box" hidden></div>'
+        "</section>"
+        '<section class="panel">'
         "<h2>Windows &amp; macOS Workstation Scan (No Command Line)</h2>"
         "<p class=\"hint\">Download the 1-click scanner for your workstation and "
         "double-click it. It collects installed apps/packages and loaded libraries "
@@ -934,6 +972,150 @@ def render_login_portal(auth_mgr: ManifestAuthManager, next_url: str = "/") -> s
     )
 
 
+_ALLOWED_INGEST_TYPES = {
+    "netflow",
+    "ipfix",
+    "sflow",
+    "openlineage-http",
+    "aws-s3",
+    "aws-cwlogs",
+    "azure-nsg",
+    "gcp-vpc",
+    "cisco",
+}
+
+
+def _default_ingest_config() -> dict:
+    return {
+        "graph_id": "estate-graph",
+        "ttl_seconds": DEFAULT_TTL_SECONDS,
+        "reissue_interval_seconds": 3600,
+        "servicenow": None,
+        "sources": [],
+    }
+
+
+def _load_ingest_config(cfg_path: Path) -> dict:
+    if cfg_path.is_file():
+        try:
+            data = json.loads(cfg_path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                base = _default_ingest_config()
+                base.update(data)
+                return base
+        except Exception:
+            pass
+    return _default_ingest_config()
+
+
+def _ingest_env_status() -> dict[str, bool]:
+    """Strictly boolean indicators — never expose plaintext credential values."""
+    return {
+        "AWS_ACCESS_KEY_ID": bool(os.environ.get("AWS_ACCESS_KEY_ID", "").strip()),
+        "AZURE_STORAGE_CONNECTION_STRING": bool(
+            os.environ.get("AZURE_STORAGE_CONNECTION_STRING", "").strip()
+        ),
+        "GOOGLE_APPLICATION_CREDENTIALS": bool(
+            os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+        ),
+        "CISCO_API_TOKEN": bool(os.environ.get("CISCO_API_TOKEN", "").strip()),
+        "SERVICENOW_CREDENTIALS": bool(
+            os.environ.get("SERVICENOW_BEARER_TOKEN", "").strip()
+            or (
+                os.environ.get("SERVICENOW_USER", "").strip()
+                and os.environ.get("SERVICENOW_PASSWORD", "").strip()
+            )
+        ),
+    }
+
+
+def _save_ingest_config(body: dict, cfg_path: Path) -> dict:
+    ttl = int(body.get("ttl_seconds") or DEFAULT_TTL_SECONDS)
+    interval = int(body.get("reissue_interval_seconds") or 3600)
+    if ttl <= 0:
+        raise ValueError("ttl_seconds must be positive")
+    if interval <= 0 or interval >= ttl:
+        raise ValueError("reissue_interval_seconds must be strictly shorter than ttl_seconds")
+
+    raw_sources = body.get("sources") or []
+    if not isinstance(raw_sources, list):
+        raise ValueError("sources must be a list")
+    clean_sources: list[dict] = []
+    for idx, src in enumerate(raw_sources, start=1):
+        if not isinstance(src, dict):
+            raise ValueError("each source must be an object")
+        stype = str(src.get("type") or "").strip().lower()
+        if stype not in _ALLOWED_INGEST_TYPES:
+            raise ValueError(f"unsupported source type: {stype!r}")
+        entry = dict(src)
+        entry["type"] = stype
+        entry["id"] = str(src.get("id") or f"{stype}-{idx}").strip()
+        clean_sources.append(entry)
+
+    sn = body.get("servicenow")
+    if isinstance(sn, dict) and str(sn.get("instance_url") or "").strip():
+        sn_clean = {"instance_url": str(sn["instance_url"]).strip()}
+    else:
+        sn_clean = None
+
+    cfg = {
+        "graph_id": str(body.get("graph_id") or "estate-graph").strip() or "estate-graph",
+        "ttl_seconds": ttl,
+        "reissue_interval_seconds": interval,
+        "servicenow": sn_clean,
+        "sources": clean_sources,
+    }
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text(json.dumps(cfg, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return {"ok": True, "config": cfg, "env_status": _ingest_env_status()}
+
+
+def _run_ingest_once(views_dir: Path, keys_dir: Path, cfg_path: Path) -> dict:
+    from .ingestors.runner import build_runner_from_config
+
+    cfg = _load_ingest_config(cfg_path)
+    priv_path, pub_path = _ensure_keys(keys_dir)
+    tmp_cfg = dict(cfg)
+    tmp_cfg["private_key_path"] = str(priv_path)
+    tmp_cfg["checkpoint_path"] = str(cfg_path.parent / "ingest_checkpoints.json")
+    tmp_cfg["output_envelope"] = str(cfg_path.parent / "ingested.envelope.json")
+
+    run_cfg_path = cfg_path.parent / ".ingest_run.json"
+    run_cfg_path.write_text(json.dumps(tmp_cfg, indent=2) + "\n", encoding="utf-8")
+    runner, startables = build_runner_from_config(run_cfg_path)
+    for item in startables:
+        item.start()
+    try:
+        report = runner.run_cycle()
+    finally:
+        for item in startables:
+            item.stop()
+
+    env = json.loads(Path(tmp_cfg["output_envelope"]).read_text(encoding="utf-8"))
+    pub = load_public_key(pub_path)
+    verified = verify_envelope(env, pub)
+    filename = _safe_html_name(f"{cfg['graph_id']}_ingested_view", "ingested_view")
+    (views_dir / filename).write_text(
+        render_html(
+            verified,
+            verification={
+                "status": "verified",
+                "keyid": keyid_for(pub),
+                "detail": f"Live ingest cycle seq={verified.sequence} signed and verified.",
+            },
+            title=f"G1-Manifest — {verified.graph_id} (seq {verified.sequence})",
+        ),
+        encoding="utf-8",
+    )
+    return {
+        "ok": True,
+        "view": filename,
+        "url": f"/{filename}",
+        "report": report,
+        "views": _views_metadata(views_dir),
+    }
+
+
 def _resolve_require_auth(require_auth: bool | None) -> bool:
     if require_auth is not None:
         return bool(require_auth)
@@ -950,6 +1132,7 @@ def make_handler(
 ):
     root = views_dir.resolve()
     kdir = (keys_dir or (root.parent / "keys")).resolve()
+    ingest_cfg_path = (root.parent / "ingest_config.json").resolve()
     enforce_auth = _resolve_require_auth(require_auth)
     auth_mgr = auth_manager or ManifestAuthManager()
 
@@ -1107,6 +1290,16 @@ def make_handler(
 
             if path == "/api/views":
                 self._send_json(HTTPStatus.OK, {"views": _views_metadata(root)})
+                return
+            if path == "/api/ingest/config":
+                self._send_json(
+                    HTTPStatus.OK,
+                    {
+                        "ok": True,
+                        "config": _load_ingest_config(ingest_cfg_path),
+                        "env_status": _ingest_env_status(),
+                    },
+                )
                 return
             if path == "/api/agent/windows.cmd":
                 host_hdr = self.headers.get("Host") or "127.0.0.1:8088"
@@ -1286,6 +1479,10 @@ def make_handler(
                     res = _run_demo_scan(root)
                 elif path == "/api/ingest/host":
                     res = _run_ingest_host(body, root, kdir)
+                elif path == "/api/ingest/config":
+                    res = _save_ingest_config(body, ingest_cfg_path)
+                elif path == "/api/ingest/run-once":
+                    res = _run_ingest_once(root, kdir, ingest_cfg_path)
                 elif path == "/api/render":
                     res = _run_render_artifact(body, root, kdir)
                 elif path == "/api/keys/rotate":
@@ -1450,6 +1647,8 @@ html.dark .btn-danger-outline:hover { background: rgba(127, 29, 29, 0.35); }
 html.dark .status-ok { background: rgba(20, 83, 45, 0.4); border-color: #166534; color: #bbf7d0; }
 html.dark .status-err { background: rgba(127, 29, 29, 0.4); border-color: #991b1b; color: #fecaca; }
 .status-box a { color: inherit; font-weight: 700; }
+.form select { font-size: 13px; padding: 6px 8px; border: 1px solid var(--border);
+  border-radius: 4px; background: var(--surface); color: var(--text); }
 code { background: var(--surface-subtle); padding: 1px 5px; border-radius: 3px;
   font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 pre.cmd { margin: 0; padding: 10px 12px; background: #0f172a; color: #f1f5f9;
@@ -1796,6 +1995,127 @@ document.getElementById('btn-rotate-key').addEventListener('click', async () => 
   } catch (err) {
     showStatus(box, false, esc(err.message));
   }
+});
+
+let ingestSources = [];
+function renderIngestSources() {
+  const ul = document.getElementById('ing-sources-list');
+  if (!ul) return;
+  if (!ingestSources.length) {
+    ul.innerHTML = '<li><span class="meta">No live ingestion sources configured yet.</span></li>';
+    return;
+  }
+  ul.innerHTML = ingestSources.map((s, i) => {
+    const target = s.bucket || s.log_group || s.container || s.catalyst_url || ((s.host || '0.0.0.0') + ':' + (s.port || ''));
+    return '<li><span><code>' + esc(s.type) + '</code> <strong>' + esc(s.id) + '</strong> · ' +
+      esc(target) + '</span><button type="button" class="btn-secondary" data-rm="' + i + '">Remove</button></li>';
+  }).join('');
+  ul.querySelectorAll('button[data-rm]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      ingestSources.splice(Number(btn.dataset.rm), 1);
+      renderIngestSources();
+    });
+  });
+}
+function renderEnvStatus(envStatus) {
+  const el = document.getElementById('ing-env-status');
+  if (!el || !envStatus) return;
+  const parts = Object.entries(envStatus).map(([k, v]) =>
+    '<code>' + esc(k) + '</code>: ' + (v ? '<strong>set</strong>' : 'unset')
+  );
+  el.innerHTML = 'Env credentials: ' + parts.join(' · ');
+}
+function buildIngestPayload() {
+  const snUrl = (document.getElementById('ing-sn-url').value || '').trim();
+  return {
+    graph_id: (document.getElementById('ing-graph-id').value || 'estate-graph').trim(),
+    ttl_seconds: Number(document.getElementById('ing-ttl').value || 86400),
+    reissue_interval_seconds: Number(document.getElementById('ing-interval').value || 3600),
+    servicenow: snUrl ? { instance_url: snUrl } : null,
+    sources: ingestSources,
+  };
+}
+(async () => {
+  try {
+    const resp = await fetch('/api/ingest/config');
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.config) {
+        document.getElementById('ing-graph-id').value = data.config.graph_id || 'estate-graph';
+        document.getElementById('ing-ttl').value = data.config.ttl_seconds || 86400;
+        document.getElementById('ing-interval').value = data.config.reissue_interval_seconds || 3600;
+        document.getElementById('ing-sn-url').value = (data.config.servicenow && data.config.servicenow.instance_url) || '';
+        ingestSources = Array.isArray(data.config.sources) ? data.config.sources : [];
+        renderIngestSources();
+      }
+      renderEnvStatus(data.env_status);
+    }
+  } catch (_) {}
+})();
+
+document.getElementById('btn-ing-add').addEventListener('click', () => {
+  const stype = document.getElementById('ing-src-type').value;
+  const raw = (document.getElementById('ing-src-target').value || '').trim();
+  const id = stype + '-' + (ingestSources.length + 1);
+  let entry = { id, type: stype };
+  if (stype === 'netflow' || stype === 'sflow' || stype === 'openlineage-http') {
+    const defPort = stype === 'netflow' ? 2055 : (stype === 'sflow' ? 6343 : 5000);
+    if (raw.includes(':')) {
+      const [h, p] = raw.split(':');
+      entry.host = h || '127.0.0.1';
+      entry.port = Number(p) || defPort;
+    } else {
+      entry.host = '127.0.0.1';
+      entry.port = Number(raw) || defPort;
+    }
+  } else if (stype === 'aws-s3' || stype === 'gcp-vpc') {
+    entry.bucket = raw || 'vpc-flow-logs';
+  } else if (stype === 'aws-cwlogs') {
+    entry.log_group = raw || '/aws/vpc/flow-logs';
+  } else if (stype === 'azure-nsg') {
+    entry.container = raw || 'insights-logs-networksecuritygroupflowevent';
+  } else if (stype === 'cisco') {
+    entry.catalyst_url = raw || 'https://dnac.internal';
+  }
+  ingestSources.push(entry);
+  document.getElementById('ing-src-target').value = '';
+  renderIngestSources();
+});
+
+document.getElementById('form-ingest-cfg').addEventListener('submit', async e => {
+  e.preventDefault();
+  const box = document.getElementById('ingest-status');
+  try {
+    const res = await postJson('/api/ingest/config', buildIngestPayload());
+    renderEnvStatus(res.env_status);
+    showStatus(box, true, 'Saved ingestion config (' + esc(res.config.sources.length) + ' source(s)).');
+  } catch (err) {
+    showStatus(box, false, esc(err.message));
+  }
+});
+
+document.getElementById('btn-ing-run').addEventListener('click', async () => {
+  const box = document.getElementById('ingest-status');
+  try {
+    const res = await postJson('/api/ingest/run-once', {});
+    refreshViews(res.views);
+    const rep = res.report || {};
+    const failed = (rep.failed_sources || []).length;
+    showStatus(box, true,
+      'Ingest cycle seq=' + esc(rep.sequence) + ' complete (' + esc(rep.nodes) +
+      ' nodes, ' + esc(rep.edges) + ' edges' + (failed ? ', ' + failed + ' quarantined' : '') +
+      '). <a href="' + esc(res.url) + '">Open ' + esc(res.view) + ' &rarr;</a>');
+  } catch (err) {
+    showStatus(box, false, esc(err.message));
+  }
+});
+
+document.getElementById('btn-ing-download').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(buildIngestPayload(), null, 2) + '\n'], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'ingest.json';
+  a.click();
 });
 
 setInterval(async () => {
