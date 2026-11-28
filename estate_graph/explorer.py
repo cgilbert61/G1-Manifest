@@ -1135,10 +1135,13 @@ def render_explorer_html(
         "</header>"
         '<nav class="toolbar">'
         '<div class="tabs">'
-        '<button type="button" class="tab active" data-view="diff">1. Diff View</button>'
+        '<label class="scan-picker">Scan: <select id="sel-env-a"></select></label>'
+        '<label class="scan-picker" id="row-env-b" style="display:none">Compare: <select id="sel-env-b"></select></label>'
+        '<a class="btn-secondary" id="btn-dl-env" href="#" download hidden>.envelope.json</a>'
+        '<button type="button" class="tab" data-view="diff">1. Diff View</button>'
         '<button type="button" class="tab" data-view="ego">2. Ego View</button>'
         '<button type="button" class="tab" data-view="findings">3. Findings-First</button>'
-        '<button type="button" class="tab" data-view="zoom">4. Zoom Levels</button>'
+        '<button type="button" class="tab active" data-view="zoom">4. Zoom Levels</button>'
         "</div>"
         '<div class="filters">'
         '<label><input type="checkbox" class="flt-layer" value="network" checked> network</label>'
@@ -1153,12 +1156,6 @@ def render_explorer_html(
         "</nav>"
         '<main class="workspace">'
         '<aside class="sidebar" id="sidebar">'
-        '<div class="card" id="scan-selector-card" hidden>'
-        '<h3>Loaded Scan / Signed Envelope</h3>'
-        '<div class="input-row"><select id="sel-env-a"></select></div>'
-        '<div class="input-row" id="row-env-b"><select id="sel-env-b"></select></div>'
-        '<div class="input-row"><a class="btn-secondary" id="btn-dl-env" href="#" download hidden>Download .envelope.json</a></div>'
-        "</div>"
         '<div id="view-controls"></div>'
         '<div id="view-details"></div>'
         "</aside>"
@@ -1195,7 +1192,9 @@ body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, sans-serif; b
 .proof-meta code { color: var(--accent); font-size: 10.5px; display: block; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
 .top-actions { display: flex; gap: 8px; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
-.tabs { display: flex; gap: 6px; }
+.tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.scan-picker { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text); margin-right: 4px; }
+.scan-picker select { background: #0b1120; color: var(--text); border: 1px solid var(--accent); border-radius: 6px; padding: 5px 8px; font-size: 12px; min-width: 170px; }
 .tab { background: transparent; color: var(--muted); border: 1px solid var(--border); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; }
 .tab.active { background: var(--accent); color: #082f49; border-color: var(--accent); }
 .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
@@ -1234,7 +1233,7 @@ _EXPLORER_JS = r"""
   const BOOT = window.__G1_EXPLORER_BOOT || {};
   const API = BOOT.api_base || "/api/explorer";
   const STATE = {
-    view: "diff",
+    view: "zoom",
     data: null,
     demoCache: null,
     storedEnvelopes: [],
@@ -1640,24 +1639,22 @@ _EXPLORER_JS = r"""
   }
 
   function populateEnvelopeSelectors() {
-    const card = document.getElementById("scan-selector-card");
     const selA = document.getElementById("sel-env-a");
     const selB = document.getElementById("sel-env-b");
     const rowB = document.getElementById("row-env-b");
     const dlBtn = document.getElementById("btn-dl-env");
-    if (!card || !selA || !selB) return;
-    card.hidden = false;
+    if (!selA || !selB) return;
     const opts = [
-      `<option value="__demo__">Bundled Demo Estate (A vs B)</option>`,
       ...STATE.storedEnvelopes.map((e) =>
         `<option value="${esc(e.id)}">${esc(e.id)} (${e.size_kb} KB)</option>`
       ),
+      `<option value="__demo__">Bundled Demo Estate</option>`,
     ].join("");
     selA.innerHTML = opts;
     selB.innerHTML = opts;
     selA.value = STATE.envA;
     selB.value = STATE.envB;
-    rowB.style.display = STATE.view === "diff" ? "flex" : "none";
+    if (rowB) rowB.style.display = STATE.view === "diff" ? "inline-flex" : "none";
     const found = STATE.storedEnvelopes.find((e) => e.id === STATE.envA);
     if (found && dlBtn) {
       dlBtn.href = found.download_url;
@@ -1681,10 +1678,9 @@ _EXPLORER_JS = r"""
     if (reqEnv && STATE.storedEnvelopes.some((e) => e.id === reqEnv)) {
       STATE.envA = reqEnv;
       STATE.envB = reqEnv;
-      STATE.view = "zoom";
-      document.querySelectorAll(".tab").forEach((b) => {
-        b.classList.toggle("active", b.dataset.view === "zoom");
-      });
+    } else if (STATE.storedEnvelopes.length > 0) {
+      STATE.envA = STATE.storedEnvelopes[0].id;
+      STATE.envB = STATE.storedEnvelopes[0].id;
     }
     populateEnvelopeSelectors();
     const selA = document.getElementById("sel-env-a");

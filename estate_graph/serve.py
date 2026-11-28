@@ -1844,10 +1844,28 @@ def make_handler(
                     b"Not Found\n",
                 )
                 return
+            raw_html = target.read_text(encoding="utf-8")
+            stem = target.stem
+            webgl_bar = (
+                '<div style="position:fixed;top:14px;right:18px;z-index:9999;'
+                'display:flex;gap:8px;font-family:system-ui,-apple-system,sans-serif;">'
+                '<a href="/" style="background:#f1f5f9;color:#0f172a;border:1px solid #cbd5e1;'
+                'padding:7px 12px;border-radius:6px;text-decoration:none;font-size:12.5px;'
+                'font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,0.08);">&larr; Dashboard</a>'
+                f'<a href="/explorer?envelope={quote(stem)}" style="background:#0284c7;color:#ffffff;'
+                'border:1px solid #0369a1;padding:7px 14px;border-radius:6px;text-decoration:none;'
+                'font-size:12.5px;font-weight:700;box-shadow:0 2px 6px rgba(2,132,199,0.28);">'
+                'View in WebGL</a>'
+                "</div>"
+            )
+            if "</body>" in raw_html:
+                raw_html = raw_html.replace("</body>", webgl_bar + "</body>", 1)
+            else:
+                raw_html = raw_html + webgl_bar
             self._send(
                 HTTPStatus.OK,
                 "text/html; charset=utf-8",
-                target.read_bytes(),
+                raw_html.encode("utf-8"),
             )
 
         def do_POST(self) -> None:  # noqa: N802
