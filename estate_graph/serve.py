@@ -1860,8 +1860,6 @@ def make_handler(
             )
             if "</body>" in raw_html:
                 raw_html = raw_html.replace("</body>", webgl_bar + "</body>", 1)
-            else:
-                raw_html = raw_html + webgl_bar
             self._send(
                 HTTPStatus.OK,
                 "text/html; charset=utf-8",
