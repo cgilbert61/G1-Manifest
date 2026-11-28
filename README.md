@@ -87,6 +87,20 @@ Every containment and shielding system lives or dies on one question: *what does
   <img src="docs/assets/screenshots/06-live-telemetry-ingestion.png" alt="G1-Manifest Live Telemetry Ingestion Dropdown and Workstation Scanners" width="100%" />
 </p>
 
+### 7. Interactive WebGL Explorer — Light Mode & Scan Selector (`/explorer`)
+> Explore large signed graphs (including 1,500+ node Windows workstation scans and 10,000+ node synthetic estates) with hardware-accelerated WebGL rendering, a `Scan:` selector for all stored signed envelopes, Light/Dark theme toggle synced with the dashboard, and hierarchical **Zoom Levels** (`estate → segment → service → instance`).
+
+<p align="center">
+  <img src="docs/assets/screenshots/07-webgl-explorer-light.png" alt="G1-Manifest Interactive WebGL Explorer in Light Mode with Scan Dropdown and Zoom Levels" width="100%" />
+</p>
+
+### 8. Interactive WebGL Explorer — Dark Mode & Findings-First View
+> Switch seamlessly to Dark mode and triage reconciliation findings (`observed_undeclared` / `declared_unobserved`) with pinned evidence and a focused WebGL subgraph highlighting undeclared external flows.
+
+<p align="center">
+  <img src="docs/assets/screenshots/08-webgl-explorer-dark-findings.png" alt="G1-Manifest Interactive WebGL Explorer in Dark Mode showing Findings-First View" width="100%" />
+</p>
+
 ---
 
 ## Interactive WebGL Explorer (`/explorer` & `g1-manifest explore`)
